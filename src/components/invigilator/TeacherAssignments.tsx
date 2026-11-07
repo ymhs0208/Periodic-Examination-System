@@ -1,5 +1,5 @@
 import { serverNow } from '../../types/time';
-import { ArrowRight, CalendarDays, ClipboardList, Clock, DoorOpen } from 'lucide-react';
+import { ArrowRight, CalendarDays } from 'lucide-react';
 import { WorkbenchHeader } from './WorkbenchHeader';
 import { useId } from 'react';
 import type { ClassroomExamState, ExamConfig, ExamPeriod } from '../../types/exam';
@@ -27,13 +27,7 @@ export function TeacherAssignments({ classroom, config, periods = [], now, onSel
 
   return (
     <section aria-labelledby={titleId} className="space-y-4">
-      <WorkbenchHeader tab="assignments" titleId={titleId} heading={heading}
-        info={[
-          { label: '考試', value: config.examName || '—', icon: ClipboardList },
-          { label: '指派考場', value: classroom ? `${classroom.className}（${classroom.classId}）` : '尚未指派', icon: DoorOpen, tone: classroom ? 'default' : 'warning' },
-          { label: '監考節次', value: classroom ? `共 ${periods.length} 節` : '—', icon: CalendarDays },
-          { label: '今天（台北時間）', value: `${today} ${time ?? ''}`.trim(), icon: Clock }
-        ]} />
+      <WorkbenchHeader tab="assignments" titleId={titleId} heading={heading} info={[]} />
 
       {!classroom ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-700 shadow-sm sm:px-6">目前尚未指派監考考場。教務處完成指派後，這裡會顯示你的監考安排。</p>

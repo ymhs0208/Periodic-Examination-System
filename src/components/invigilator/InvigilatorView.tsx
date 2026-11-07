@@ -388,14 +388,14 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
       </p>
 
       <WorkbenchHeader tab={tab}
-        info={[
+        info={tab === 'attendance' || tab === 'issues' ? [
           { label: '監考考場', value: `${classroom.className}（${classroom.classId}）`, icon: DoorOpen },
           { label: '年級', value: gradeLabel(config, classroom.grade), icon: Users },
           { label: '目前節次', value: period ? periodLabel(period) : '非考試時段', icon: Clock },
           tab === 'attendance'
             ? { label: '點名狀態', value: reportStatus, icon: CheckCircle2, tone: reportStatus === '本節已回報' ? 'success' : 'warning' }
             : { label: '監考教師', value: (period && attendanceRecord.invigilator) || '—', icon: UserRound }
-        ]}
+        ] : []}
         actions={classList.length > 1 ? (
             <select value={classroom.classId} aria-label="切換監考班級" onChange={(event) => onSelectClass(event.target.value)}
               className="min-h-10 min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-2 text-sm font-bold text-slate-900">
