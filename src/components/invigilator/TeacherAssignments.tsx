@@ -1,5 +1,6 @@
 import { serverNow } from '../../types/time';
-import { ArrowRight, CalendarDays, ClipboardList, DoorOpen } from 'lucide-react';
+import { ArrowRight, CalendarDays, ClipboardList, Clock, DoorOpen } from 'lucide-react';
+import { WorkbenchHeader } from './WorkbenchHeader';
 import { useId } from 'react';
 import type { ClassroomExamState, ExamConfig, ExamPeriod } from '../../types/exam';
 import { classroomForPeriod, periodLabel, taipeiDateTime } from '../../types/examSchedule';
@@ -13,7 +14,6 @@ export function TeacherAssignments({ classroom, config, periods = [], now, onSel
   onSelectPeriod?: (id: string) => void;
   heading?: 'h1' | 'h2';
 }) {
-  const Title = heading;
   const titleId = useId();
   const Subtitle = heading === 'h1' ? 'h2' : 'h3';
   const DayTitle = heading === 'h1' ? 'h3' : 'h4';
@@ -26,29 +26,19 @@ export function TeacherAssignments({ classroom, config, periods = [], now, onSel
   }
 
   return (
-    <section aria-labelledby={titleId} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <header className="attendance-banner relative isolate flex flex-wrap items-center justify-between gap-3 px-4 py-5 text-white sm:px-6">
-        <div className="attendance-banner-pattern pointer-events-none absolute inset-0 -z-10" aria-hidden="true" />
-        <div className="min-w-0">
-          <p className="flex items-center gap-2 text-xs font-bold text-teal-100"><ClipboardList size={16} aria-hidden="true" />教師工作台</p>
-          <Title id={titleId} tabIndex={-1} className="mt-1 scroll-mt-4 text-xl font-black sm:text-2xl">我的監考安排</Title>
-          {config.examName && <p className="mt-1 text-sm text-slate-100 [overflow-wrap:anywhere]">{config.examName}</p>}
-        </div>
-        {classroom && (
-          <div className="flex min-w-0 items-center gap-2 rounded-xl border border-white/25 bg-slate-950/25 px-3 py-2">
-            <DoorOpen size={18} className="shrink-0 text-teal-100" aria-hidden="true" />
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-teal-100">指派考場</p>
-              <p className="text-sm font-black [overflow-wrap:anywhere]">{classroom.className}（{classroom.classId}）</p>
-            </div>
-          </div>
-        )}
-      </header>
+    <section aria-labelledby={titleId} className="space-y-4">
+      <WorkbenchHeader tab="assignments" titleId={titleId} heading={heading}
+        info={[
+          { label: '考試', value: config.examName || '—', icon: ClipboardList },
+          { label: '指派考場', value: classroom ? `${classroom.className}（${classroom.classId}）` : '尚未指派', icon: DoorOpen, tone: classroom ? 'default' : 'warning' },
+          { label: '監考節次', value: classroom ? `共 ${periods.length} 節` : '—', icon: CalendarDays },
+          { label: '今天（台北時間）', value: `${today} ${time ?? ''}`.trim(), icon: Clock }
+        ]} />
 
       {!classroom ? (
-        <p className="p-4 text-sm leading-6 text-slate-700 sm:px-6">目前尚未指派監考考場。教務處完成指派後，這裡會顯示你的監考安排。</p>
+        <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-700 shadow-sm sm:px-6">目前尚未指派監考考場。教務處完成指派後，這裡會顯示你的監考安排。</p>
       ) : (
-        <div className="p-4 sm:p-6">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-1">
             <Subtitle className="text-base font-black text-slate-950">監考節次</Subtitle>
             <p className="text-xs font-bold text-slate-600">{gradeLabel(config, classroom.grade)} · 共 {periods.length} 節 · 台灣時間</p>

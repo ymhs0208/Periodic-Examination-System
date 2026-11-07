@@ -702,7 +702,7 @@ export default function App() {
 
             {/* 獨立路徑 4: /admin 及各子路徑 (/admin/matrix, /admin/broadcast, /admin/issues, /admin/settings, /admin/reports) */}
             {activeView === 'admin' && (
-              <div className="max-w-7xl mx-auto">
+              <div className={activeAdminTab === 'home' && isAdminAuthed ? 'w-full' : 'mx-auto max-w-7xl'}>
                 {isAdminAuthed ? (
                   <AdminView
                     data={systemData}

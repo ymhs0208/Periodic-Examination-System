@@ -1141,16 +1141,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
       { view: 'academic' as const, href: '/board/academic', label: '教務處看板', description: '全校考場監看、異常優先與投影模式', icon: Radio }
     ];
     return (
-      <div className={`print-report-root flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm ${isEmbedded ? 'xl:h-[820px] xl:overflow-y-auto' : ''}`}>
+      <div className={`print-report-root flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-[#e7eef2] shadow-sm ${isEmbedded ? 'xl:h-[820px] xl:overflow-y-auto' : ''}`}>
         {confirmationDialog}
-        <section className="attendance-banner no-print relative isolate overflow-hidden px-4 py-5 text-white sm:px-7 sm:py-7">
-          <div className="attendance-banner-pattern pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3" aria-hidden="true" />
+        <section className="attendance-banner no-print relative isolate overflow-hidden px-5 py-7 text-white sm:px-10 sm:py-10">
+          <div className="attendance-banner-pattern pointer-events-none absolute inset-0 -z-10" aria-hidden="true" />
           <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-teal-200"><Building2 size={16} aria-hidden="true" />教務管理中心</p>
-          <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-4xl">教務管理中心</h1>
-          {examDetails.length > 0 && <p className="mt-2 text-sm text-slate-200">{examDetails.join(' · ')}</p>}
+          <h1 className="mt-3 max-w-3xl text-3xl font-black tracking-tight sm:text-5xl">選擇要開啟的看板</h1>
+          {examDetails.length > 0 && <p className="mt-3 text-sm text-slate-200 sm:text-base">{examDetails.join(' · ')}</p>}
         </section>
-        <div className="bg-slate-50 p-4 sm:p-7">
-          <nav aria-label="看板入口" className="grid gap-3 sm:grid-cols-3">
+        <div className="flex-1 p-5 sm:p-10">
+          <nav aria-label="看板入口" className="grid gap-4 lg:grid-cols-3">
             {portalEntries.map(({ view, href, label, description, icon: Icon }) => (
               <a key={view} href={href}
                 onClick={(event) => {
@@ -1158,15 +1158,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   event.preventDefault();
                   onNavigateView(view);
                 }}
-                className="flex min-h-36 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
-                <span className="grid size-12 place-items-center rounded-xl bg-teal-50 text-teal-800"><Icon size={24} aria-hidden="true" /></span>
-                <span className="mt-4 text-lg font-black text-slate-950">{label}</span>
-                <span className="mt-1 text-sm leading-6 text-slate-600">{description}</span>
+                className="flex min-h-52 flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700 sm:p-7">
+                <span className="grid size-14 place-items-center rounded-2xl bg-teal-50 text-teal-800"><Icon size={28} aria-hidden="true" /></span>
+                <span className="mt-6 text-2xl font-black text-slate-950">{label}</span>
+                <span className="mt-2 text-sm leading-6 text-slate-600">{description}</span>
+                <span className="mt-auto pt-6 text-sm font-bold text-teal-800">開啟</span>
               </a>
             ))}
           </nav>
-          <div className="mt-6">
-            <h2 className="mb-2 text-sm font-bold text-slate-600">考務作業</h2>
+          <div className="mt-10">
+            <h2 className="mb-3 text-sm font-bold text-slate-600">考務作業</h2>
             <nav aria-label="教務功能" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {sections.map((section) => {
                 const Icon = section.icon;
@@ -1177,7 +1178,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       event.preventDefault();
                       setActiveTab(section.id);
                     }}
-                    className="flex min-h-11 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
+                    className="flex min-h-12 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
                     <Icon size={16} className="shrink-0 text-teal-800" aria-hidden="true" />
                     {section.label}
                   </a>

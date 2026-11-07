@@ -12,8 +12,13 @@ import {
   Siren,
   Settings2,
   ChevronUp,
-  LogOut
+  LogOut,
+  DoorOpen,
+  Users,
+  Clock,
+  UserRound
 } from 'lucide-react';
+import { WorkbenchHeader } from './WorkbenchHeader';
 import { examSync } from '../../services/examSync';
 import { ABSENCE_REASONS } from '../../types/exam';
 import type { ClassroomExamState, ExamIssue, IssueType, ExamAnnouncement, AbsentStudent, ExamConfig, ExamPeriod } from '../../types/exam';
@@ -23,7 +28,7 @@ import { availableGrades, gradeLabel } from '../../types/grades';
 import { classroomAnnouncements } from '../../types/announcements';
 import { useActionConfirmation } from '../useActionConfirmation';
 import { useAnnouncementClock } from '../useAnnouncementClock';
-import { invigilatorTitle, type InvigilatorTab } from './InvigilatorNavigation';
+import { type InvigilatorTab } from './InvigilatorNavigation';
 
 interface InvigilatorViewProps {
   classroom: ClassroomExamState;
@@ -65,7 +70,7 @@ export function ScheduledInvigilatorView({ tab, correctionSubmission, ...props }
       <InvigilatorView key={period?.id ?? 'unselected'} {...props} period={period} tab={tab}
         extraPage={tab === 'corrections' ? correctionSubmission : null}
         periodControls={
-          <section ref={attendanceSection} tabIndex={-1} className="min-w-0 rounded-xl bg-white p-3 text-slate-900 sm:p-4" aria-label="點名節次">
+          <section ref={attendanceSection} tabIndex={-1} className="min-w-0 text-slate-900" aria-label="點名節次">
             <ExamPeriodSelect periods={periods} value={selected?.id ?? ''} onChange={selectPeriod} autoLabel="自動選擇目前考試" />
             <p className="mt-2 text-sm font-bold text-slate-700">
               {period ? `點名節次 · ${periodLabel(period)}` : periods.length ? '目前不是考試時段，請選擇要回報的節次。' : examPeriods(props.config).length ? '本帳號沒有此班適用的點名節次，請聯絡教務確認監考指派。' : '尚未建立考程，請聯絡教務建立後再點名。'}
@@ -373,38 +378,37 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
         {currentAnnouncements[0] ? `最新考務公告：${currentAnnouncements[0].title}` : ''}
       </p>
 
-      <header className="attendance-banner relative isolate overflow-hidden rounded-2xl border border-slate-800 p-4 text-white sm:p-6">
-        <div className="attendance-banner-pattern pointer-events-none absolute inset-0 -z-10" aria-hidden="true" />
-        <div className={`grid min-w-0 gap-4 md:items-center ${tab === 'attendance' ? 'md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]' : ''}`}>
-          <div className="min-w-0">
-            <p className="flex items-center gap-2 text-xs font-bold tracking-wide text-teal-100"><ClipboardCheck size={16} aria-hidden="true" />教師工作台</p>
-            <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-4xl">{tab === 'attendance' ? '監考點名' : invigilatorTitle(tab)}</h1>
-            <p className="mt-2 text-base font-black [overflow-wrap:anywhere] sm:text-lg">{classroom.className}（{classroom.classId}）</p>
-            <p className="mt-0.5 text-sm text-slate-100 [overflow-wrap:anywhere]">{gradeLabel(config, classroom.grade)}{period && attendanceRecord.invigilator ? ` · ${attendanceRecord.invigilator}` : ''}</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(canEditClassroom || classList.length > 1) && (
-                  <select value={classroom.classId} aria-label="切換監考班級" onChange={(event) => onSelectClass(event.target.value)}
-                    className="min-h-10 min-w-0 max-w-full rounded-lg border border-white/25 bg-slate-900 px-2 text-xs font-bold text-white">
-                    {classList.map((room) => <option key={room.classId} value={room.classId}>{room.className}</option>)}
-                  </select>
-              )}
-              {canEditClassroom && (
-                  <button type="button" onClick={() => setIsEditingClassInfo((open) => !open)} aria-expanded={isEditingClassInfo}
-                    className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-teal-200 px-2.5 text-xs font-bold text-slate-950 hover:bg-teal-100">
-                    {isEditingClassInfo ? <ChevronUp size={15} aria-hidden="true" /> : <Settings2 size={15} aria-hidden="true" />}
-                    {isEditingClassInfo ? '收起設定' : '考場設定'}
-                  </button>
-              )}
-              {onLogout && (
-                <button type="button" onClick={onLogout} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-2.5 text-xs font-bold text-white hover:bg-white/20">
-                  <LogOut size={15} aria-hidden="true" />登出
-                </button>
-              )}
-            </div>
-          </div>
-          {tab === 'attendance' && periodControls}
-        </div>
-      </header>
+      <WorkbenchHeader tab={tab}
+        info={[
+          { label: '監考考場', value: `${classroom.className}（${classroom.classId}）`, icon: DoorOpen },
+          { label: '年級', value: gradeLabel(config, classroom.grade), icon: Users },
+          { label: '目前節次', value: period ? periodLabel(period) : '非考試時段', icon: Clock },
+          tab === 'attendance'
+            ? { label: '點名狀態', value: reportStatus, icon: CheckCircle2, tone: reportStatus === '本節已回報' ? 'success' : 'warning' }
+            : { label: '監考教師', value: (period && attendanceRecord.invigilator) || '—', icon: UserRound }
+        ]}
+        actions={<>
+          {(canEditClassroom || classList.length > 1) && (
+            <select value={classroom.classId} aria-label="切換監考班級" onChange={(event) => onSelectClass(event.target.value)}
+              className="min-h-10 min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-2 text-sm font-bold text-slate-900">
+              {classList.map((room) => <option key={room.classId} value={room.classId}>{room.className}</option>)}
+            </select>
+          )}
+          {canEditClassroom && (
+            <button type="button" onClick={() => setIsEditingClassInfo((open) => !open)} aria-expanded={isEditingClassInfo}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-3 text-sm font-bold text-teal-900 hover:bg-teal-100">
+              {isEditingClassInfo ? <ChevronUp size={15} aria-hidden="true" /> : <Settings2 size={15} aria-hidden="true" />}
+              {isEditingClassInfo ? '收起設定' : '考場設定'}
+            </button>
+          )}
+          {onLogout && (
+            <button type="button" onClick={onLogout} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-100">
+              <LogOut size={15} aria-hidden="true" />登出
+            </button>
+          )}
+        </>}>
+        {tab === 'attendance' ? periodControls : null}
+      </WorkbenchHeader>
 
       {canEditClassroom && isEditingClassInfo && (
         <form onSubmit={handleSaveClassInfo} className="space-y-3 rounded-2xl border border-teal-200 bg-teal-50 p-4">

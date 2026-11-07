@@ -1,6 +1,6 @@
 import { useServerClock } from '../useServerClock';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, Maximize, Minimize, Monitor, Pause, Play, RotateCw, Wifi, WifiOff } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, Clock, Maximize, Minimize, Monitor, Pause, Play, RotateCw, WifiOff } from 'lucide-react';
 import type { SystemData } from '../../types/exam';
 import type { LiveConnection } from '../../services/examSync';
 import { academicOverview, academicStatus, type AcademicRoom } from './academicOverview';
@@ -49,6 +49,9 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
   const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
   const overview = useMemo(() => academicOverview(data, now), [data, now]);
   const { rooms, totals } = overview;
+  const [hours, minutes, seconds] = clock.format(now).split(':');
+  const examTitle = data.config.examName || '全校考場監看';
+  const schoolName = data.config.schoolName || '段考考務即時管理系統';
   const pageCount = projection ? Math.max(1, Math.ceil(rooms.length / capacity)) : 1;
   const currentPage = Math.min(page, pageCount - 1);
   const visibleRooms = projection ? rooms.slice(currentPage * capacity, (currentPage + 1) * capacity) : rooms;
@@ -115,29 +118,54 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
   }
 
   const attention = rooms.filter((item) => item.priority <= 3);
+  const actions = <div className="academic-actions">
+    {!projection && <button type="button" onClick={onOpenOperations}><ArrowLeft size={16} aria-hidden="true" />管理中心</button>}
+    <button ref={fullscreenButtonRef} type="button" onClick={toggleFullscreen} aria-pressed={projection}>
+      {projection ? <Minimize size={17} aria-hidden="true" /> : <Maximize size={17} aria-hidden="true" />}
+      {projection ? nativeFullscreen ? '退出全螢幕' : '退出投影' : '全螢幕投影'}
+    </button>
+  </div>;
   return <section ref={boardRef} className={`academic-board${projection ? ' academic-board--projection' : ''}`} aria-labelledby="academic-board-title">
-    <header className="academic-header">
-      <div className="academic-brand"><span className="academic-brand-icon"><Monitor aria-hidden="true" /></span><div>
-        <p><span className="academic-eyebrow">教務處總覽看板</span>{data.config.schoolName || '段考考務即時管理系統'}</p>
-        <h1 id="academic-board-title">{data.config.examName || '全校考場監看'}</h1>
-      </div></div>
-      <div className="academic-header-right"><div className="academic-clock"><strong>{clock.format(now)}</strong><span>{overview.today} · 台北時間</span></div>
-        <div className="academic-actions">
-          {!projection && <button type="button" onClick={onOpenOperations}><ArrowLeft size={16} aria-hidden="true" />管理中心</button>}
-          <button ref={fullscreenButtonRef} type="button" onClick={toggleFullscreen} aria-pressed={projection}>
-            {projection ? <Minimize size={17} aria-hidden="true" /> : <Maximize size={17} aria-hidden="true" />}
-            {projection ? nativeFullscreen ? '退出全螢幕' : '退出投影' : '全螢幕投影'}
-          </button>
+    {projection ? <header className="academic-header">
+      <div className="academic-toolbar">
+        <div className="academic-brand">
+          <span className="academic-brand-icon"><Monitor size={17} aria-hidden="true" /></span>
+          <strong>教務處總覽看板</strong>
+          <span className="academic-school">{schoolName}</span>
+        </div>
+        {actions}
+      </div>
+      <div className="academic-masthead">
+        <div className="academic-exam">
+          <p className={`academic-exam-state${totals.active ? ' academic-exam-active' : ''}`}>
+            {totals.active ? `考試進行中 · ${totals.active} 場` : '目前非考試時段'}
+          </p>
+          <h1 id="academic-board-title">{examTitle}</h1>
+          <p className="academic-exam-detail">{totals.total} 場考場 · {overview.today} · 台北時間</p>
+        </div>
+        <div className="academic-clock">
+          <p className="academic-kicker"><Clock size={15} aria-hidden="true" />台灣時間</p>
+          <time dateTime={now.toISOString()} className="academic-clock-time">{hours}:{minutes}<span>:{seconds}</span></time>
+          <time dateTime={overview.today} className="academic-clock-date">{overview.today}</time>
         </div>
       </div>
-    </header>
-    <div className={`academic-connection ${connected ? '' : 'academic-connection--lost'}`} role="status">
-      {connected ? <Wifi size={20} aria-hidden="true" /> : <WifiOff size={22} aria-hidden="true" />}
-      <div><strong>{connected ? '即時連線正常' : liveConnection === 'offline' ? '網路離線 · 資料暫停更新' : liveConnection === 'connecting' ? '正在建立即時連線 · 資料尚未確認' : '同步連線中斷 · 正在重連'}</strong>
-        <span>{connected ? '收到資料：' : '目前顯示上次資料：'}{lastDataReceivedAt ? `${receivedTime.format(new Date(lastDataReceivedAt))}（台北時間）` : '尚無接收紀錄'}{!connected && '；請勿將舊資料視為即時結果。'}</span></div>
-      {!connected && <button type="button" onClick={onReconnect}><RotateCw size={17} aria-hidden="true" />重新連線</button>}
-    </div>
+    </header> : <header className="academic-header">
+      <div className="academic-brand"><span className="academic-brand-icon"><Monitor aria-hidden="true" /></span><div>
+        <p><span className="academic-eyebrow">教務處總覽看板</span>{schoolName}</p>
+        <h1 id="academic-board-title">{examTitle}</h1>
+      </div></div>
+      <div className="academic-header-right"><div className="academic-clock"><strong>{clock.format(now)}</strong><span>{overview.today} · 台北時間</span></div>
+        {actions}
+      </div>
+    </header>}
+    {!connected && <div className="academic-connection academic-connection--lost" role="status">
+      <WifiOff size={22} aria-hidden="true" />
+      <div><strong>{liveConnection === 'offline' ? '網路離線 · 資料暫停更新' : liveConnection === 'connecting' ? '正在建立即時連線 · 資料尚未確認' : '同步連線中斷 · 正在重連'}</strong>
+        <span>目前顯示上次資料：{lastDataReceivedAt ? `${receivedTime.format(new Date(lastDataReceivedAt))}（台北時間）` : '尚無接收紀錄'}；請勿將舊資料視為即時結果。</span></div>
+      <button type="button" onClick={onReconnect}><RotateCw size={17} aria-hidden="true" />重新連線</button>
+    </div>}
     {fullscreenNotice && <p className="academic-fullscreen-notice" role="status">{fullscreenNotice}</p>}
+    <div className={projection ? 'academic-layout' : 'contents'}>
     <dl className="academic-metrics">
       <div><dt>全校考場</dt><dd>{totals.total}<small>場</small></dd><p>考試中 {totals.active} 場</p></div>
       <div><dt>已回報</dt><dd>{totals.reported}<small>/ {totals.scheduled} 場</small></dd><p>依各班顯示節次</p></div>
@@ -155,6 +183,7 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
     <div ref={gridAreaRef} className="academic-grid-area" tabIndex={0} aria-label="全校考場卡片，可捲動查看">
       {rooms.length ? <div className="academic-grid">{visibleRooms.map((item) => <RoomCard key={item.room.classId} item={item} />)}</div>
         : <div className="academic-empty"><Monitor size={40} aria-hidden="true" /><h2>尚未建立考場</h2><p>請先到管理中心設定班級與考程，完成後會自動顯示於此。</p></div>}
+    </div>
     </div>
     <footer className="academic-footer"><div><p>顯示各班「進行中 → 今日下一節 → 今日最後一節」；節次依各班今日考程排序。</p><p>缺席偏高：≥ 3 人或 ≥ 10%。僅顯示統計，不顯示學生資料。連線狀態為此看板，非各考場裝置。</p></div>
       {projection && pageCount > 1 ? <div className="academic-pager">

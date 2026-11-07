@@ -1,11 +1,11 @@
 import { Bell, CalendarDays, ClipboardCheck, FilePenLine, Send } from 'lucide-react';
 
 const pages = {
-  attendance: { title: '座號點名', icon: ClipboardCheck },
-  announcements: { title: '考務公告', icon: Bell },
-  issues: { title: '考場通報', icon: Send },
-  assignments: { title: '我的監考安排', icon: CalendarDays },
-  corrections: { title: '試題更正送審', icon: FilePenLine }
+  attendance: { title: '座號點名', icon: ClipboardCheck, description: '依座號標記缺席學生，確認後回報本節出缺席。' },
+  announcements: { title: '考務公告', icon: Bell, description: '教務處發布的試題更正、延長與緊急公告。' },
+  issues: { title: '考場通報', icon: Send, description: '考場有狀況時，一鍵通知教務處與巡堂人員。' },
+  assignments: { title: '我的監考安排', icon: CalendarDays, description: '查看你負責的考場與各日監考節次。' },
+  corrections: { title: '試題更正送審', icon: FilePenLine, description: '提出試題更正，送教務處審核後公告。' }
 };
 
 export type InvigilatorTab = keyof typeof pages;
@@ -15,6 +15,7 @@ export function isInvigilatorTab(value: string): value is InvigilatorTab {
   return tabs.some((tab) => tab === value);
 }
 
+export const invigilatorPage = (tab: InvigilatorTab) => pages[tab];
 export const invigilatorTitle = (tab: InvigilatorTab) => pages[tab].title;
 export const invigilatorPath = (tab: InvigilatorTab, classId?: string) =>
   `/invigilator/${tab}${classId ? `/${encodeURIComponent(classId)}` : ''}`;
