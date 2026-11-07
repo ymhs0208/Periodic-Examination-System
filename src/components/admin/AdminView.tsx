@@ -5,7 +5,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
   Building2,
-  Monitor,
   AlertTriangle,
   CheckCircle2,
   FileEdit,
@@ -48,6 +47,7 @@ import { useActionConfirmation } from '../useActionConfirmation';
 import { useAnnouncementClock } from '../useAnnouncementClock';
 import { announcementDisplayStart, announcementStatus } from '../../types/announcements';
 import { availableGrades, classroomGrades, gradeLabel } from '../../types/grades';
+import { BoardPortals } from '../BoardPortalHome';
 import { MAX_EXAM_AUTHOR_ASSIGNMENTS } from '../../types/exam';
 import type {
   ExamAuthorAssignment,
@@ -1135,11 +1135,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const CurrentIcon = currentSection.icon;
   const examDetails = [data.config.examName, data.config.subject, data.config.examDate].filter(Boolean);
   if (activeTab === 'home') {
-    const portalEntries = [
-      { view: 'blackboard' as const, href: '/blackboard', label: '教室電子黑板', description: '投影考程、公告與試題更正', icon: Monitor },
-      { view: 'attendance' as const, href: '/attendance', label: '出席即時看板', description: '查看各班出席統計與缺席明細', icon: LayoutGrid },
-      { view: 'academic' as const, href: '/board/academic', label: '教務處看板', description: '全校考場監看、異常優先與投影模式', icon: Radio }
-    ];
     return (
       <div className={`print-report-root flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-[#e7eef2] shadow-sm ${isEmbedded ? 'xl:h-[820px] xl:overflow-y-auto' : ''}`}>
         {confirmationDialog}
@@ -1150,22 +1145,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           {examDetails.length > 0 && <p className="mt-3 text-sm text-slate-200 sm:text-base">{examDetails.join(' · ')}</p>}
         </section>
         <div className="flex-1 p-5 sm:p-10">
-          <nav aria-label="看板入口" className="grid gap-4 lg:grid-cols-3">
-            {portalEntries.map(({ view, href, label, description, icon: Icon }) => (
-              <a key={view} href={href}
-                onClick={(event) => {
-                  if (!onNavigateView || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-                  event.preventDefault();
-                  onNavigateView(view);
-                }}
-                className="flex min-h-52 flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700 sm:p-7">
-                <span className="grid size-14 place-items-center rounded-2xl bg-teal-50 text-teal-800"><Icon size={28} aria-hidden="true" /></span>
-                <span className="mt-6 text-2xl font-black text-slate-950">{label}</span>
-                <span className="mt-2 text-sm leading-6 text-slate-600">{description}</span>
-                <span className="mt-auto pt-6 text-sm font-bold text-teal-800">開啟</span>
-              </a>
-            ))}
-          </nav>
+          <BoardPortals onNavigate={onNavigateView} />
           <div className="mt-10">
             <h2 className="mb-3 text-sm font-bold text-slate-600">考務作業</h2>
             <nav aria-label="教務功能" className="grid grid-cols-2 gap-2 sm:grid-cols-4">

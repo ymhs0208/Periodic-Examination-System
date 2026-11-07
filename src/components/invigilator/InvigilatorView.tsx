@@ -10,8 +10,6 @@ import {
   FileQuestion,
   Wrench,
   Siren,
-  Settings2,
-  ChevronUp,
   LogOut,
   DoorOpen,
   Users,
@@ -24,7 +22,7 @@ import { ABSENCE_REASONS } from '../../types/exam';
 import type { ClassroomExamState, ExamIssue, IssueType, ExamAnnouncement, AbsentStudent, ExamConfig, ExamPeriod } from '../../types/exam';
 import { activePeriod, classroomForPeriod, examPeriods, periodApplies, periodLabel } from '../../types/examSchedule';
 import { ExamPeriodSelect, useExamClock } from '../ExamPeriodSelect';
-import { availableGrades, gradeLabel } from '../../types/grades';
+import { gradeLabel } from '../../types/grades';
 import { classroomAnnouncements } from '../../types/announcements';
 import { useActionConfirmation } from '../useActionConfirmation';
 import { useAnnouncementClock } from '../useAnnouncementClock';
@@ -37,7 +35,6 @@ interface InvigilatorViewProps {
   announcements: ExamAnnouncement[];
   classList: Pick<ClassroomExamState, 'classId' | 'className' | 'grade'>[];
   onSelectClass: (classId: string) => void;
-  canEditClassroom?: boolean;
   onLogout?: () => void;
   initialPeriodId?: string;
   allowedPeriodIds?: string[];
@@ -137,7 +134,6 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   announcements,
   classList,
   onSelectClass,
-  canEditClassroom = false,
   onLogout,
   period,
   periodControls,
@@ -163,16 +159,6 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
   const [attendanceSavedMessage, setAttendanceSavedMessage] = useState(false);
   const [attendanceError, setAttendanceError] = useState('');
-
-  // Classroom & Invigilator inline edit state
-  const [isEditingClassInfo, setIsEditingClassInfo] = useState(false);
-  const [editGrade, setEditGrade] = useState<number>(classroom.grade);
-  const [editClassName, setEditClassName] = useState<string>(classroom.className);
-  const [editInvigilator, setEditInvigilator] = useState<string>(classroom.invigilator);
-  const [editExpectedCount, setEditExpectedCount] = useState(classroom.expectedCount);
-  const [classInfoSaved, setClassInfoSaved] = useState(false);
-  const [savingClassInfo, setSavingClassInfo] = useState(false);
-  const [classInfoError, setClassInfoError] = useState('');
 
   const [selectedPresetId, setSelectedPresetId] = useState<string>('');
   const [issueType, setIssueType] = useState<IssueType>('general');
@@ -211,43 +197,12 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     try { sessionStorage.removeItem(draftKey); } catch { /* no storage */ }
   };
 
-  useEffect(() => {
-    setEditGrade(classroom.grade);
-    setEditClassName(classroom.className);
-    setEditInvigilator(classroom.invigilator);
-    setEditExpectedCount(classroom.expectedCount);
-  }, [classroom.classId, classroom.grade, classroom.className, classroom.invigilator, classroom.expectedCount]);
-
   const expectedCount = attendanceRecord.expectedCount;
   const presentCount = Math.max(0, expectedCount - absentStudents.length);
   const absentCount = absentStudents.length;
   const classroomIssues = issues.filter((i) => i.classId === classroom.classId);
   const announcementNow = useAnnouncementClock(announcements);
   const currentAnnouncements = classroomAnnouncements(announcements, classroom, announcementNow);
-
-  const handleSaveClassInfo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (savingClassInfo) return;
-    setSavingClassInfo(true);
-    setClassInfoError('');
-    try {
-      await examSync.updateClassroom(classroom.classId, {
-        grade: editGrade,
-        className: editClassName.trim() || classroom.className,
-        invigilator: editInvigilator.trim() || classroom.invigilator,
-        expectedCount: editExpectedCount
-      });
-      setClassInfoSaved(true);
-      setTimeout(() => {
-        setClassInfoSaved(false);
-        setIsEditingClassInfo(false);
-      }, 1000);
-    } catch (error) {
-      setClassInfoError(error instanceof Error ? error.message : '無法儲存考場設定。');
-    } finally {
-      setSavingClassInfo(false);
-    }
-  };
 
   const handleToggleSeat = (seatNo: number) => {
     lockPeriod();
@@ -362,7 +317,6 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     attendanceRecord.absentStudents.some((student) => absenceBySeat.get(student.seatNo)?.reason !== student.reason);
   const reportStatus = changed ? '有未送出的變更' :
     attendanceRecord.statusReported || attendanceSavedMessage ? '本節已回報' : '本節尚未回報';
-  const field = 'mt-1 block min-h-11 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2.5 text-sm text-slate-950';
   const primary = 'inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-teal-800 px-4 text-sm font-black text-white hover:bg-teal-900 disabled:cursor-default disabled:opacity-50';
   const announcementLabels = { correction: '試題更正', emergency: '緊急公告', extension: '考試延長', notice: '考務公告' };
 
@@ -388,18 +342,11 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
             : { label: '監考教師', value: (period && attendanceRecord.invigilator) || '—', icon: UserRound }
         ]}
         actions={<>
-          {(canEditClassroom || classList.length > 1) && (
+          {classList.length > 1 && (
             <select value={classroom.classId} aria-label="切換監考班級" onChange={(event) => onSelectClass(event.target.value)}
               className="min-h-10 min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-2 text-sm font-bold text-slate-900">
               {classList.map((room) => <option key={room.classId} value={room.classId}>{room.className}</option>)}
             </select>
-          )}
-          {canEditClassroom && (
-            <button type="button" onClick={() => setIsEditingClassInfo((open) => !open)} aria-expanded={isEditingClassInfo}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-3 text-sm font-bold text-teal-900 hover:bg-teal-100">
-              {isEditingClassInfo ? <ChevronUp size={15} aria-hidden="true" /> : <Settings2 size={15} aria-hidden="true" />}
-              {isEditingClassInfo ? '收起設定' : '考場設定'}
-            </button>
           )}
           {onLogout && (
             <button type="button" onClick={onLogout} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-100">
@@ -409,32 +356,6 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
         </>}>
         {tab === 'attendance' ? periodControls : null}
       </WorkbenchHeader>
-
-      {canEditClassroom && isEditingClassInfo && (
-        <form onSubmit={handleSaveClassInfo} className="space-y-3 rounded-2xl border border-teal-200 bg-teal-50 p-4">
-          <h2 className="text-base font-black text-teal-950">考場設定</h2>
-          <div className="grid items-end gap-2 sm:grid-cols-2 lg:grid-cols-5">
-            <label className="min-w-0 text-sm font-bold text-slate-800">年級
-              <select value={editGrade} onChange={(event) => setEditGrade(Number(event.target.value))} className={field}>
-                {availableGrades(config, classList).map((grade) => <option key={grade} value={grade}>{gradeLabel(config, grade)}</option>)}
-              </select>
-            </label>
-            <label className="min-w-0 text-sm font-bold text-slate-800">班級名稱
-              <input value={editClassName} onChange={(event) => setEditClassName(event.target.value)} className={field} />
-            </label>
-            <label className="min-w-0 text-sm font-bold text-slate-800">監考老師
-              <input value={editInvigilator} onChange={(event) => setEditInvigilator(event.target.value)} className={field} />
-            </label>
-            <label className="min-w-0 text-sm font-bold text-slate-800">應到人數
-              <input type="number" min={1} max={60} value={editExpectedCount}
-                onChange={(event) => setEditExpectedCount(Math.max(1, Number(event.target.value) || 30))} className={field} />
-            </label>
-            <button type="submit" disabled={savingClassInfo || classInfoSaved} className={primary}>{savingClassInfo ? '儲存中…' : '儲存設定'}</button>
-          </div>
-          {classInfoError && <p role="alert" className="text-sm font-bold text-rose-800">{classInfoError}</p>}
-          {classInfoSaved && <p role="status" className="text-sm font-bold text-teal-900">考場設定已儲存。</p>}
-        </form>
-      )}
 
       {tab === 'attendance' && (
         <section id="invigilator-attendance" tabIndex={-1} aria-labelledby="invigilator-attendance-title" className="min-w-0 scroll-mt-4 rounded-2xl border border-slate-200 bg-white">

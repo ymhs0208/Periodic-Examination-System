@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, Clock, M
 import type { SystemData } from '../../types/exam';
 import type { LiveConnection } from '../../services/examSync';
 import { academicOverview, academicStatus, type AcademicRoom } from './academicOverview';
+import { invigilatorPath } from '../invigilator/InvigilatorNavigation';
 import './academic-board.css';
 
 interface Props {
@@ -12,15 +13,21 @@ interface Props {
   lastDataReceivedAt?: string;
   onReconnect: () => void;
   onOpenOperations: () => void;
+  onOpenClassroom: (classId: string, periodId?: string) => void;
 }
 const clock = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const receivedTime = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-function RoomCard({ item }: { item: AcademicRoom }) {
+function RoomCard({ item, href, onOpen }: { item: AcademicRoom; href: string; onOpen: () => void }) {
   const { room, period, phase } = item;
   const tone = item.urgentIssues ? 'critical' : item.missing ? 'warning' : item.highAbsence ? 'danger' : item.openIssues ? 'warning' : 'normal';
   const known = !!period && room.statusReported;
-  return <article className={`academic-room academic-room--${tone}`} aria-label={`${room.className}，${academicStatus(item)}`}>
+  return <a href={href} className={`academic-room academic-room--${tone}`} aria-label={`進入${room.className}，${academicStatus(item)}`}
+    onClick={(event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+      event.preventDefault();
+      onOpen();
+    }}>
     <div className="academic-room-top">
       <h3 title={room.className}>{room.className}</h3>
       <span className="academic-room-status">{tone !== 'normal' && <AlertTriangle size={15} aria-hidden="true" />}{academicStatus(item)}</span>
@@ -33,10 +40,10 @@ function RoomCard({ item }: { item: AcademicRoom }) {
       <div className={known && room.absentCount > 0 ? 'academic-absent' : ''}><dt>缺席</dt><dd>{known ? room.absentCount : '—'}</dd></div>
     </dl>
     {item.openIssues > 0 && <p className="academic-room-issue">今日通報待處理 {item.openIssues} 件{item.urgentIssues > 0 ? `（緊急 ${item.urgentIssues} 件）` : ''}</p>}
-  </article>;
+  </a>;
 }
 
-export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, onReconnect, onOpenOperations }: Props) {
+export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, onReconnect, onOpenOperations, onOpenClassroom }: Props) {
   const now = useServerClock(1000);
   const [projection, setProjection] = useState(false);
   const [nativeFullscreen, setNativeFullscreen] = useState(false);
@@ -98,6 +105,15 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
     const timer = window.setInterval(() => setPage((previous) => (previous + 1) % pageCount), 12000);
     return () => window.clearInterval(timer);
   }, [projection, autoRotate, pageCount]);
+
+  async function openClassroom(classId: string, periodId?: string) {
+    setFullscreenNotice('');
+    if (document.fullscreenElement === boardRef.current) {
+      try { await document.exitFullscreen(); } catch { /* leaving this page */ }
+    }
+    setProjection(false);
+    onOpenClassroom(classId, periodId);
+  }
 
   async function toggleFullscreen() {
     setFullscreenNotice('');
@@ -179,9 +195,20 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
         <span>{attention.length ? attention.slice(0, 5).map((item) => `${item.room.className} ${academicStatus(item)}`).join('　／　') + (attention.length > 5 ? `　另 ${attention.length - 5} 場` : '') : totals.active ? '考場持續監看中' : '目前非考試時段；尚未開始不列為未回報'}</span></div>
       <b>今日緊急 {totals.urgent} 場 · 待處理 {totals.openIssues} 件</b>
     </div>
-    <div className="academic-section-title"><h2><Activity size={19} aria-hidden="true" />全校考場一覽</h2><p>緊急通報 → 未回報 → 缺席偏高 → 其他考場</p></div>
+    <div className="academic-section-title">
+      <div>
+        <h2><Activity size={19} aria-hidden="true" />全校考場一覽</h2>
+        <p>依緊急通報、未回報、缺席偏高、其他考場排序</p>
+      </div>
+      <ul className="academic-legend" aria-label="考場狀態顏色分級">
+        <li className="academic-legend-item academic-legend-item--normal">正常</li>
+        <li className="academic-legend-item academic-legend-item--warning">未回報</li>
+        <li className="academic-legend-item academic-legend-item--danger">缺席偏高</li>
+        <li className="academic-legend-item academic-legend-item--critical">緊急通報</li>
+      </ul>
+    </div>
     <div ref={gridAreaRef} className="academic-grid-area" tabIndex={0} aria-label="全校考場卡片，可捲動查看">
-      {rooms.length ? <div className="academic-grid">{visibleRooms.map((item) => <RoomCard key={item.room.classId} item={item} />)}</div>
+      {rooms.length ? <div className="academic-grid">{visibleRooms.map((item) => <RoomCard key={item.room.classId} item={item} href={invigilatorPath('attendance', item.room.classId)} onOpen={() => { void openClassroom(item.room.classId, item.period?.id); }} />)}</div>
         : <div className="academic-empty"><Monitor size={40} aria-hidden="true" /><h2>尚未建立考場</h2><p>請先到管理中心設定班級與考程，完成後會自動顯示於此。</p></div>}
     </div>
     </div>

@@ -7,6 +7,7 @@ import { serverNow } from './types/time';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ClipboardCheck } from 'lucide-react';
 import { Header, VIEW_PATHS, type ActiveView } from './components/Header';
+import { BoardPortalHome } from './components/BoardPortalHome';
 import { BlackboardView } from './components/blackboard/BlackboardView';
 import { AcademicBoardView } from './components/academic/AcademicBoardView';
 import { AttendanceBoardView } from './components/attendance/AttendanceBoardView';
@@ -28,6 +29,7 @@ import { createEmptyExamState, type ExamSession, type SystemData } from './types
 type BoardView = 'blackboard' | 'attendance';
 
 const pageTitles: Record<ActiveView, string> = {
+  home: '',
   blackboard: '教室電子黑板',
   attendance: '出席即時看板',
   academic: '教務處看板',
@@ -136,12 +138,19 @@ function parseRouteFromPathname(pathname: string): {
     };
   }
 
-  // Default to /blackboard
-  return {
-    view: 'blackboard',
-    classId: first === 'blackboard' && second ? second : undefined,
-    normalizedPath: first === 'blackboard' && second ? `/blackboard/${second}` : '/blackboard'
-  };
+  if (!first) {
+    return { view: 'home', normalizedPath: '/' };
+  }
+
+  if (first === 'blackboard') {
+    return {
+      view: 'blackboard',
+      classId: second || undefined,
+      normalizedPath: second ? `/blackboard/${second}` : '/blackboard'
+    };
+  }
+
+  return { view: 'home', normalizedPath: '/' };
 }
 
 export default function App() {
@@ -176,13 +185,7 @@ export default function App() {
 
   const [systemData, setSystemData] = useState<SystemData>(createEmptyExamState);
 
-  // Normalize initial root path '/' to '/blackboard'
   useEffect(() => {
-    if (window.location.pathname === '/' || window.location.pathname === '') {
-      window.history.replaceState({}, '', '/blackboard');
-      setCurrentPath('/blackboard');
-    }
-
     const handlePopState = () => {
       const parsed = parseRouteFromPathname(window.location.pathname);
       setActiveView(parsed.view);
@@ -597,6 +600,13 @@ export default function App() {
               />
             )}
 
+            {activeView === 'home' && (
+              <BoardPortalHome
+                details={[systemData.config.examName, systemData.config.subject, systemData.config.examDate].filter(Boolean).join(' · ') || undefined}
+                onNavigate={navigateToView}
+              />
+            )}
+
             {/* 獨立路徑 1: /blackboard (教室電子黑板) */}
             {boardView === 'blackboard' && boardClassroom && (
               <div className="w-full flex-1 min-h-0 flex flex-col lg:overflow-hidden">
@@ -639,7 +649,8 @@ export default function App() {
             {activeView === 'academic' && (
               isAdminAuthed ? <AcademicBoardView data={systemData} liveConnection={liveConnection}
                 lastDataReceivedAt={lastDataReceivedAt} onReconnect={() => examSync.reconnect()}
-                onOpenOperations={() => navigateToView('admin')} />
+                onOpenOperations={() => navigateToView('admin')}
+                onOpenClassroom={(classId, periodId) => navigateToInvigilatorTab('attendance', classId, periodId)} />
               : <>
                   {session && <p role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 font-bold text-amber-950">教務處看板僅供教務管理員使用。請改用教務管理員帳號登入。</p>}
                   <LoginPage config={systemData.config} intendedView="academic"
@@ -670,7 +681,6 @@ export default function App() {
                           issues={systemData.issues}
                           announcements={systemData.announcements}
                           classList={isAdminAuthed ? classList : teacherRooms}
-                          canEditClassroom={isAdminAuthed}
                           onSelectClass={(classId) => navigateToInvigilatorTab(invigilatorTab, classId, '')}
                           initialPeriodId={invigilatorPeriodId}
                           allowedPeriodIds={isAdminAuthed ? undefined : teacherPeriods(invigilatorClassroom.classId)}

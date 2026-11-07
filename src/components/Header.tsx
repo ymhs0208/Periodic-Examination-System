@@ -6,9 +6,10 @@ import {
 import type { AdminTab } from './admin/AdminView';
 import type { PolicyView } from './PolicyPage';
 
-export type ActiveView = 'blackboard' | 'attendance' | 'academic' | 'invigilator' | 'admin' | 'login' | PolicyView;
+export type ActiveView = 'home' | 'blackboard' | 'attendance' | 'academic' | 'invigilator' | 'admin' | 'login' | PolicyView;
 
 export const VIEW_PATHS: Record<ActiveView, string> = {
+  home: '/',
   blackboard: '/blackboard',
   attendance: '/attendance',
   academic: '/board/academic',
@@ -143,8 +144,8 @@ export function Header({
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#10243d] text-white shadow-sm">
       <div className="relative mx-auto grid max-w-[1720px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 px-3 sm:gap-x-4 sm:px-6 lg:px-8">
         <a
-          href={VIEW_PATHS.blackboard}
-          onClick={(event) => navigate(event, 'blackboard')}
+          href={VIEW_PATHS.home}
+          onClick={(event) => navigate(event, 'home')}
           className={`col-start-1 row-start-1 flex min-h-14 min-w-0 items-center gap-2 rounded-xl sm:min-h-16 sm:gap-3 ${focusStyle}`}
         >
           <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-teal-200 text-[#10243d] sm:size-10">

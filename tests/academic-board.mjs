@@ -56,7 +56,7 @@ try {
   check('empty state is valid', () => assert.equal(academicOverview(createEmptyExamState(), now).totals.total, 0));
   // Minimal browser globals for SSR-only projection smoke tests.
   globalThis.window = { matchMedia: () => ({ matches: false }) };
-  const props = { data: state(), liveConnection: 'offline', lastDataReceivedAt: '2026-11-07T01:30:00Z', onReconnect() {}, onOpenOperations() {} };
+  const props = { data: state(), liveConnection: 'offline', lastDataReceivedAt: '2026-11-07T01:30:00Z', onReconnect() {}, onOpenOperations() {}, onOpenClassroom() {} };
   check('projection renders connection warning but no private details', () => {
     const html = renderToStaticMarkup(React.createElement(AcademicBoardView, props));
     assert.match(html, /網路離線/); assert.match(html, /舊資料/); assert.match(html, /全螢幕投影/);
@@ -66,6 +66,11 @@ try {
     const header = (admin) => renderToStaticMarkup(React.createElement(Header, { activeView: 'academic', currentPath: '/board/academic', isAdminAuthed: admin, isInvigilatorAuthed: false, autoOpenMenuSignal: 0, loggedInUsername: '', onViewChange() {}, onNavigateAdminTab() {}, onLogout() {} }));
     assert.doesNotMatch(header(true), /教務處看板|出席即時看板|教室電子黑板/);
     assert.doesNotMatch(header(false), /href="\/board\/academic"/);
+  });
+  check('room cards link into the classroom workbench', () => {
+    const html = renderToStaticMarkup(React.createElement(AcademicBoardView, props));
+    assert.match(html, /href="\/invigilator\/attendance\/101"/);
+    assert.match(html, /進入101班/);
   });
   check('direct route asks for administrator login', () => assert.match(renderToStaticMarkup(React.createElement(LoginPage, { config: state().config, intendedView: 'academic', onLoginSuccess() {}, onNavigateView() {} })), /教務處看板登入|教務管理員帳號/));
   console.log(`All ${count} academic-board checks passed.`);
