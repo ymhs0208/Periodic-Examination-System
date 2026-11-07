@@ -14,7 +14,8 @@ import {
   DoorOpen,
   Users,
   Clock,
-  UserRound
+  UserRound,
+  ChevronDown
 } from 'lucide-react';
 import { WorkbenchHeader } from './WorkbenchHeader';
 import { examSync } from '../../services/examSync';
@@ -121,6 +122,24 @@ const PRESET_ISSUES = [
   }
 ];
 
+
+function parseAbsentSeatNumbers(raw: string) {
+  const tokens = raw.trim().split(/[\s,，、;；]+/).filter(Boolean);
+  if (!tokens.length) return { error: '請輸入缺席座號，例如 3、7、15。' };
+  const seats: number[] = [];
+  const seen = new Set<number>();
+  for (const token of tokens) {
+    if (!/^\d+$/.test(token)) return { error: `「${token}」不是有效座號。請輸入數字，並用頓號、逗號或空白分隔。` };
+    const seatNo = Number(token);
+    if (seatNo < 1) return { error: '座號須從 1 開始。' };
+    if (!seen.has(seatNo)) {
+      seen.add(seatNo);
+      seats.push(seatNo);
+    }
+  }
+  return { seats };
+}
+
 const InvigilatorView: React.FC<InvigilatorViewProps & {
   period?: ExamPeriod;
   periodControls: React.ReactNode;
@@ -158,6 +177,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   const [draftWarning, setDraftWarning] = useState('');
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
   const [attendanceSavedMessage, setAttendanceSavedMessage] = useState(false);
+  const [absentSeatInput, setAbsentSeatInput] = useState('');
   const [attendanceError, setAttendanceError] = useState('');
 
   const [selectedPresetId, setSelectedPresetId] = useState<string>('');
@@ -222,6 +242,38 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
       ].sort((a, b) => a.seatNo - b.seatNo);
       setAbsentStudents(updated);
     }
+  };
+
+  const handleAddAbsentSeats = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (isSubmittingAttendance) return;
+    const parsed = parseAbsentSeatNumbers(absentSeatInput);
+    if (parsed.error || !parsed.seats) {
+      setAttendanceError(parsed.error ?? '請輸入缺席座號。');
+      return;
+    }
+    const invalid = parsed.seats.filter((seatNo) => seatNo > classroom.totalSeats);
+    if (invalid.length) {
+      setAttendanceError(`找不到座號 ${invalid.join('、')}；請輸入 1 到 ${classroom.totalSeats} 的座號。`);
+      return;
+    }
+    const newSeats = parsed.seats.filter((seatNo) => !absentStudents.some((student) => student.seatNo === seatNo));
+    if (!newSeats.length) {
+      setAttendanceError('這些座號都已列為缺席。');
+      return;
+    }
+    if (absentStudents.length + newSeats.length > attendanceRecord.expectedCount) {
+      setAttendanceError('缺席人數不可超過應到人數；座位數不代表本節應到人數。');
+      return;
+    }
+    lockPeriod();
+    setAttendanceSavedMessage(false);
+    setAttendanceError('');
+    setAbsentStudents([
+      ...absentStudents,
+      ...newSeats.map((seatNo) => ({ seatNo, name: '', reason: '' }))
+    ].sort((a, b) => a.seatNo - b.seatNo));
+    setAbsentSeatInput('');
   };
 
   const handleMarkAllPresent = () => {
@@ -364,7 +416,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
               <h2 id="invigilator-attendance-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
                 <ClipboardCheck size={20} className="text-teal-800" aria-hidden="true" />座號點名
               </h2>
-              <p className="mt-1 text-sm text-slate-700">只標記缺席，其餘視為到齊；送出後才正式回報。假別選填。草稿依班級與節次保留於本分頁。</p>
+              <p className="mt-1 text-sm text-slate-700">只標記缺席，其餘視為到齊；可直接輸入座號，或展開座位分布點選。送出後才正式回報。假別選填。草稿依班級與節次保留於本分頁。</p>
             </div>
             {period && <p className={`rounded-full px-2.5 py-1 text-xs font-bold ${reportStatus === '本節已回報' ? 'bg-teal-100 text-teal-950' : 'bg-amber-100 text-amber-950'}`}>{reportStatus}</p>}
           </div>
@@ -388,30 +440,53 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
                   ))}
                 </dl>
 
-                <div className="space-y-2">
+                <form onSubmit={handleAddAbsentSeats} className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="flex items-center gap-1.5 text-sm font-black text-slate-900">
-                      <Monitor size={17} className="text-teal-800" aria-hidden="true" />座位分布
-                    </h3>
+                    <label htmlFor="absent-seat-input" className="text-sm font-black text-slate-950">直接輸入缺席座號</label>
                     <button type="button" disabled={!absentCount || isSubmittingAttendance} onClick={handleMarkAllPresent}
-                      className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-2.5 text-xs font-bold text-teal-900 hover:bg-teal-100 disabled:opacity-50">
+                      className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-2.5 text-xs font-bold text-teal-900 hover:bg-teal-50 disabled:opacity-50">
                       <Check size={16} aria-hidden="true" />標記全班到齊
                     </button>
                   </div>
-                  <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-8 sm:gap-2">
-                    {Array.from({ length: classroom.totalSeats }, (_, index) => {
-                      const seat = index + 1;
-                      const isAbsent = absenceBySeat.has(seat);
-                      return (
-                        <button key={seat} type="button" onClick={() => handleToggleSeat(seat)} aria-pressed={isAbsent} disabled={isSubmittingAttendance}
-                          className={`flex min-h-12 flex-col items-center justify-center rounded-lg border px-0.5 font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:opacity-60 ${isAbsent ? 'border-rose-400 bg-rose-100 text-rose-950 hover:bg-rose-200' : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-teal-300 hover:bg-teal-50'}`}>
-                          <span className="font-mono text-base font-black leading-none tabular-nums sm:text-lg"><span className="sr-only">座號 </span>{String(seat).padStart(2, '0')}</span>
-                          <span className="mt-1 text-[10px] leading-none">{isAbsent ? '缺席' : '未列缺席'}</span>
-                        </button>
-                      );
-                    })}
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                    <input id="absent-seat-input" type="text" autoComplete="off" enterKeyHint="done"
+                      value={absentSeatInput} disabled={isSubmittingAttendance}
+                      placeholder="例如 3、7、15"
+                      onChange={(event) => setAbsentSeatInput(event.target.value)}
+                      className="min-h-12 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 font-mono text-base font-bold text-slate-950 placeholder:font-sans placeholder:font-bold placeholder:text-slate-400" />
+                    <button type="submit" disabled={isSubmittingAttendance || !absentSeatInput.trim()}
+                      className="inline-flex min-h-12 items-center justify-center rounded-xl bg-rose-700 px-4 text-sm font-black text-white hover:bg-rose-800 disabled:opacity-50">
+                      加入缺席
+                    </button>
                   </div>
-                </div>
+                  <p className="text-xs font-bold text-slate-600">可用頓號、逗號或空白分隔多個座號，按 Enter 即可加入。</p>
+                </form>
+
+                <details className="group rounded-xl border border-slate-200 bg-white">
+                  <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-black text-slate-900 marker:content-none [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700">
+                    <ChevronDown size={16} className="shrink-0 text-slate-500 transition-transform group-open:rotate-180" aria-hidden="true" />
+                    <span className="inline-flex items-center gap-1.5">
+                      <Monitor size={17} className="text-teal-800" aria-hidden="true" />座位分布
+                    </span>
+                    <span className="font-bold text-slate-600 group-open:hidden">展開以點選座位</span>
+                    <span className="hidden font-bold text-slate-600 group-open:inline">點選座位標記或缺席</span>
+                  </summary>
+                  <div className="border-t border-slate-200 p-3">
+                    <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-8 sm:gap-2">
+                      {Array.from({ length: classroom.totalSeats }, (_, index) => {
+                        const seat = index + 1;
+                        const isAbsent = absenceBySeat.has(seat);
+                        return (
+                          <button key={seat} type="button" onClick={() => handleToggleSeat(seat)} aria-pressed={isAbsent} disabled={isSubmittingAttendance}
+                            className={`flex min-h-12 flex-col items-center justify-center rounded-lg border px-0.5 font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:opacity-60 ${isAbsent ? 'border-rose-400 bg-rose-100 text-rose-950 hover:bg-rose-200' : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-teal-300 hover:bg-teal-50'}`}>
+                            <span className="font-mono text-base font-black leading-none tabular-nums sm:text-lg"><span className="sr-only">座號 </span>{String(seat).padStart(2, '0')}</span>
+                            <span className="mt-1 text-[10px] leading-none">{isAbsent ? '缺席' : '未列缺席'}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </details>
 
                 <div className={`rounded-xl border p-3 ${absentCount ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}>
                   <h3 className="text-sm font-black text-slate-950">缺席座號與假別 <span className="font-mono text-xs text-slate-700">（{absentCount} 人）</span></h3>
