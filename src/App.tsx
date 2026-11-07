@@ -109,7 +109,7 @@ function parseRouteFromPathname(pathname: string): {
     }
     return {
       view: 'invigilator',
-      invigilatorTab: 'attendance',
+      invigilatorTab: second ? 'attendance' : undefined,
       classId: second ? decodeClassId(second) : undefined,
       normalizedPath: second ? `/invigilator/${second}` : '/invigilator'
     };
@@ -169,7 +169,7 @@ export default function App() {
     initialRoute.view === 'invigilator' ? initialRoute.classId || '' : ''
   );
   const [invigilatorPeriodId, setInvigilatorPeriodId] = useState<string>();
-  const [invigilatorTab, setInvigilatorTab] = useState<InvigilatorTab>(initialRoute.invigilatorTab ?? 'attendance');
+  const [requestedInvigilatorTab, setInvigilatorTab] = useState(initialRoute.invigilatorTab);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [session, setSession] = useState<ExamSession | null>(null);
   const [sessionCheck, setSessionCheck] = useState<'checking' | 'ready' | 'error'>('checking');
@@ -181,6 +181,7 @@ export default function App() {
   const [logoutError, setLogoutError] = useState('');
   const isAdminAuthed = session?.role === 'admin';
   const isInvigilatorAuthed = session?.role === 'invigilator' || isAdminAuthed;
+  const invigilatorTab = requestedInvigilatorTab ?? (session?.role === 'invigilator' ? 'assignments' : 'attendance');
   const loggedInUsername = session?.username || '';
   const mainRef = useRef<HTMLElement>(null);
   const previousNavigation = useRef(currentPath);
@@ -197,7 +198,7 @@ export default function App() {
       if (parsed.view === 'invigilator' && parsed.classId) {
         setSelectedClassId(parsed.classId);
       }
-      setInvigilatorTab(parsed.invigilatorTab ?? 'attendance');
+      setInvigilatorTab(parsed.invigilatorTab);
       setInvigilatorPeriodId(undefined);
       setCurrentPath(parsed.normalizedPath);
     };
@@ -209,7 +210,7 @@ export default function App() {
   const navigateToView = useCallback((view: ActiveView) => {
     const targetPath = VIEW_PATHS[view];
     setActiveView(view);
-    if (view === 'invigilator') setInvigilatorTab('attendance');
+    if (view === 'invigilator') setInvigilatorTab(undefined);
     if (view === 'admin') setActiveAdminTab('home');
     setInvigilatorPeriodId(undefined);
     setCurrentPath(targetPath);
@@ -668,7 +669,7 @@ export default function App() {
                       showAssignments={session?.role === 'invigilator'} showCorrections={Boolean(correctionSubmission)}
                       status={{
                         announcements: workbenchAnnouncements.length ? `${workbenchAnnouncements.length} 則公告` : undefined,
-                        issues: openRoomIssues ? `${openRoomIssues} 則未結案` : undefined,
+                        issues: openRoomIssues ? `共 ${openRoomIssues} 則未結案` : undefined,
                         corrections: pendingCorrections ? `${pendingCorrections} 則待審` : undefined
                       }}
                       onNavigate={(tab) => navigateToInvigilatorTab(tab, invigilatorRouteClassId)} />

@@ -8,6 +8,7 @@ import { adminState, hashPassword, MAX_PASSWORD_LENGTH, type StoredTeacher } fro
 import { availableGrades, DEFAULT_GRADE_LABELS, gradeLabel } from '../src/types/grades';
 import { examImports, MAX_IMPORT_BYTES, type ExamImportKind } from '../src/types/examImports';
 import { applyExamCsv, ExamImportError, examImportVersion } from './examImports';
+import { canAccessPeriod } from './visibility';
 
 export const api = new Hono<{ Variables: ExamVariables }>();
 
@@ -559,18 +560,31 @@ api.post('/api/exam/classroom', (c) => {
 api.post('/api/exam/issue', (c) => {
   const state = c.get('state');
   const broadcast = c.get('broadcast');
-  const { classId, type, content, isUrgent } = c.get('body');
+  const { classId, periodId, expectedPeriod, type, content, isUrgent } = c.get('body');
   if (typeof content !== 'string' || !content.trim() || content.length > 3000) {
     return c.json({ success: false, error: '請輸入問題內容' }, 400);
   }
 
   const classroom = state.classrooms.find((room) => room.classId === classId);
   if (!classroom) return c.json({ success: false, error: '班級不存在' }, 404);
+  const period = examPeriods(state.config).find((item) => item.id === periodId);
+  if (!period || !periodApplies(period, classroom)) {
+    return c.json({ success: false, error: '請選擇此考場適用的通報節次' }, 400);
+  }
+  if (!canAccessPeriod(c.get('session'), classroom.classId, period.id)) {
+    return c.json({ success: false, error: '沒有此考場與節次的通報權限' }, 403);
+  }
+  if (expectedPeriod !== undefined && (expectedPeriod?.date !== period.date || expectedPeriod?.startTime !== period.startTime ||
+    expectedPeriod?.endTime !== period.endTime || expectedPeriod?.subject !== period.subject)) {
+    return c.json({ success: false, error: '考試節次已更新，請重新核對後再送出通報' }, 409);
+  }
 
   const newIssue: ExamIssue = {
     id: `issue-${crypto.randomUUID()}`,
     classId: classroom.classId,
     className: classroom.className,
+    periodId: period.id,
+    periodLabel: periodLabel(period),
     type: type || 'general',
     content,
     status: 'pending',

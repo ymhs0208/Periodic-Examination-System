@@ -21,9 +21,19 @@ try {
   check('unreported matrix does not claim perfect attendance', () => { const html = renderToStaticMarkup(React.createElement(AdminView, { data: makeState() })); assert.match(html, /待點名/); assert.doesNotMatch(html, /全勤到齊|全班到齊/); assert.match(html, /點名狀態/); });
   check('empty issues and teachers have actionable empty states', () => { const s = makeState(); s.teachers = []; assert.match(renderToStaticMarkup(React.createElement(AdminView, { data: s, activeAdminTab: 'issues' })), /目前沒有考場通報/); assert.match(renderToStaticMarkup(React.createElement(AdminView, { data: s, activeAdminTab: 'teachers' })), /尚未建立教師名冊/); });
   const { api } = await server.ssrLoadModule('/worker/examRoutes.ts');
+  const { visibleIssue } = await server.ssrLoadModule('/worker/visibility.ts');
   let state = makeState();
+  const session = { role: 'invigilator', classId: '101', invigilation: [{ classId: '101', periodId: 'p1' }] };
   const app = new Hono();
-  app.use('*', async (c, next) => { c.set('state', state); c.set('body', await c.req.json()); c.set('broadcast', (event, data) => { if (event === 'PERIOD_ATTENDANCE_UPDATED') state.classrooms[0].periodAttendance[data.periodId] = data.attendance; }); await next(); });
+  app.use('*', async (c, next) => {
+    c.set('state', state);
+    c.set('session', session);
+    c.set('body', await c.req.json());
+    c.set('broadcast', (event, data) => {
+      if (event === 'PERIOD_ATTENDANCE_UPDATED') state.classrooms[0].periodAttendance[data.periodId] = data.attendance;
+    });
+    await next();
+  });
   app.route('/', api);
   const post = (path, body) => app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const attendance = { classId: '101', periodId: 'p1', expectedPeriod: period, expectedLastUpdated: null, expectedCount: 5, presentCount: 5, absentCount: 0, absentStudents: [] };
@@ -32,6 +42,24 @@ try {
   assert.equal((await post('/api/exam/attendance', attendance)).status, 409); passed++; console.log('PASS stale confirmation cannot overwrite newer attendance');
   assert.equal(state.classrooms[0].periodAttendance.p1.lastUpdated, version);
   assert.equal((await post('/api/exam/attendance', { ...attendance, expectedLastUpdated: version })).status, 200); passed++; console.log('PASS fresh attendance version can save');
+  state.config.periods.push({ ...period, id: 'p2', subject: '國文', startTime: '10:10', endTime: '11:00' });
+  const issue = { classId: '101', type: 'general', content: '考場時鐘停走' };
+  assert.equal((await post('/api/exam/issue', issue)).status, 400);
+  assert.equal((await post('/api/exam/issue', { ...issue, periodId: 'p2' })).status, 403);
+  assert.equal((await post('/api/exam/issue', { ...issue, periodId: 'p1', expectedPeriod: { ...period, subject: '舊考科' } })).status, 409);
+  assert.equal(state.issues.length, 0);
+  const submitted = await post('/api/exam/issue', { ...issue, periodId: 'p1', expectedPeriod: period });
+  assert.equal(submitted.status, 200);
+  assert.equal(state.issues[0].periodId, 'p1');
+  assert.match(state.issues[0].periodLabel, /數學/);
+  check('issue access is period-scoped and unassigned history remains visible to the classroom', () => {
+    const otherPeriod = { ...session, invigilation: [{ classId: '101', periodId: 'p2' }] };
+    assert.equal(visibleIssue(state.issues[0], session), true);
+    assert.equal(visibleIssue(state.issues[0], otherPeriod), false);
+    assert.equal(visibleIssue(state.issues[0], { role: 'admin' }), true);
+    assert.equal(visibleIssue(issue, otherPeriod), true);
+    assert.ok(!visibleIssue(issue, null));
+  });
   state = makeState();
   const sameTeacher = { name: '更新姓名', username: 'test-teacher', password: 'SafeTestPassword123456', department: '雙語,英文', assignedClassId: '' };
   assert.equal((await post('/api/exam/teachers/import', { mode: 'replace', teachers: [sameTeacher] })).status, 200);

@@ -25,6 +25,8 @@ export interface ExamIssue {
   id: string;
   classId: string;
   className: string;
+  periodId?: string;
+  periodLabel?: string;
   type: IssueType;
   content: string;
   status: IssueStatus;

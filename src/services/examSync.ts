@@ -278,7 +278,8 @@ class ExamSyncService {
 
   public async reportIssue(data: {
     classId: string;
-    className: string;
+    periodId: string;
+    expectedPeriod: Pick<ExamPeriod, 'date' | 'startTime' | 'endTime' | 'subject'>;
     type: string;
     content: string;
     isUrgent?: boolean;

@@ -29,7 +29,8 @@ export function validateMutation(path: string, method: string, b: Record<string,
     rules = { type: oneOf('correction','extension','notice','emergency'), subject: text(100,true), targetAudience: (v) => typeof v === 'string' && (v === 'all' || availableGrades(state.config, state.classrooms).some(g => v === `grade_${g}`) || state.classrooms.some(r => r.classId === v)), title: text(150), content: text(3000), priority: oneOf('normal','high','critical'), publishedBy: text(100), startsAt: text(30), endsAt: text(30) };
     if (!('title' in b) || !('content' in b)) return '標題與內容皆為必填';
   } else if (path === '/api/exam/issue') {
-    rules = { classId: text(128), className: text(100), type: oneOf('general','medical','paper','facility','violation','urgent'), content: text(3000), isUrgent: bool };
+    rules = { classId: text(128), className: text(100), periodId: text(64), expectedPeriod: object,
+      type: oneOf('general','medical','paper','facility','violation','urgent'), content: text(3000), isUrgent: bool };
   } else if (/^\/api\/exam\/issue\/[^/]+$/.test(path)) {
     rules = { status: oneOf('pending','processing','resolved'), reply: text(3000,true), repliedBy: text(100) };
   } else if (/^\/api\/exam\/classroom(?:\/[^/]+)?$/.test(path)) {

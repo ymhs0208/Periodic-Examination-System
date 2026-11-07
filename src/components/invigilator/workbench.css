@@ -26,7 +26,25 @@
 }
 .wb-mark { width: 2.5rem; height: 2.5rem; }
 .wb-link-icon { width: 2rem; height: 2rem; }
-.wb-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .375rem; }
+.wb-nav-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 3.25rem;
+  align-items: center;
+  gap: .5rem;
+  border: 1px solid #bad9d3;
+  border-radius: .85rem;
+  padding: .45rem .65rem;
+  background: #eef8f5;
+  color: #183647;
+  cursor: pointer;
+  text-align: left;
+}
+.wb-nav-toggle:hover, .wb-nav-toggle[aria-expanded="true"] { background: #e1f3ed; }
+.wb-nav-chevron { flex: none; color: #126359; }
+.wb-nav-toggle[aria-expanded="true"] .wb-nav-chevron { transform: rotate(180deg); }
+.wb-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .375rem; margin-top: .5rem; }
+.wb-links[hidden] { display: none; }
 .wb-link {
   display: flex;
   min-width: 0;

@@ -27,8 +27,7 @@ export function academicOverview(data: SystemData, now: Date) {
     const missing = !!period && phase !== 'upcoming' && !room.statusReported;
     const highAbsence = !!period && room.statusReported && room.absentCount > 0 &&
       (room.absentCount >= 3 || (room.expectedCount > 0 && room.absentCount / room.expectedCount >= 0.1));
-    // Issues have no period ID. Only today's unresolved reports are shown; do not
-    // imply an old incident belongs to the current period.
+    // Unresolved issues are a daily safety summary across periods.
     const issues = data.issues.filter((issue) => issue.classId === base.classId && issue.status !== 'resolved' &&
       Number.isFinite(Date.parse(issue.createdAt)) && taipeiDateTime.format(new Date(issue.createdAt)).split(' ')[0] === today);
     const urgentIssues = issues.filter((issue) => issue.isUrgent || issue.type === 'urgent').length;

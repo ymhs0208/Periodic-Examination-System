@@ -151,6 +151,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     data.issues[0]?.id || null
   );
   const [issueClassFilter, setIssueClassFilter] = useState('');
+  const [issuePeriodFilter, setIssuePeriodFilter] = useState('');
   const [isReplying, setIsReplying] = useState<boolean>(false);
   const [replyFeedback, setReplyFeedback] = useState<{ issueId: string; error: boolean; text: string }>();
 
@@ -473,6 +474,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const normalCount = Math.max(0, totalClassrooms - abnormalCount);
   const totalAbsent = attendanceData.classrooms.reduce((acc, c) => acc + (c.absentCount || 0), 0);
   const pendingIssuesCount = data.issues.filter((i) => i.status !== 'resolved').length;
+  const issuePeriods = new Map(examPeriods(sourceData.config).map((period) => [period.id, periodLabel(period)]));
+  for (const issue of data.issues) {
+    if (issue.periodId && !issuePeriods.has(issue.periodId)) {
+      issuePeriods.set(issue.periodId, issue.periodLabel ?? '已移除的考試節次');
+    }
+  }
+  const filteredIssues = data.issues.filter((issue) =>
+    (!issueClassFilter || issue.classId === issueClassFilter) &&
+    (!issuePeriodFilter || (issue.periodId ? `period:${issue.periodId}` : 'unassigned') === issuePeriodFilter));
+  const selectedIssue = filteredIssues.find((issue) => issue.id === selectedIssueId);
 
   // Filtered Classrooms for Matrix
   const filteredClassrooms = data.classrooms.filter((c) => {
@@ -1792,15 +1803,23 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <div className="lg:col-span-6 bg-white rounded-2xl sm:rounded-3xl border-2 border-slate-200 p-4 sm:p-6 shadow-sm space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="text-sm sm:text-base font-black text-slate-900">
-                  各考場通報清單 ({data.issues.filter((i) => !issueClassFilter || i.classId === issueClassFilter).length}) · 待處理 {data.issues.filter((i) => i.status !== 'resolved' && (!issueClassFilter || i.classId === issueClassFilter)).length} 件
+                  各考場通報清單 ({filteredIssues.length}) · 待處理 {filteredIssues.filter((issue) => issue.status !== 'resolved').length} 件
                 </h3>
                 <span className="text-xs text-slate-600 font-bold">先聯絡支援人員，再選案件回覆</span>
               </div>
 
+              <label className="block min-w-0 text-sm font-bold text-slate-800">通報節次
+                <select value={issuePeriodFilter} onChange={(event) => setIssuePeriodFilter(event.target.value)}
+                  className="mt-1 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-2">
+                  <option value="">所有節次</option>
+                  {[...issuePeriods].map(([id, label]) => <option key={id} value={`period:${id}`}>{label}</option>)}
+                  <option value="unassigned">未分節的舊通報</option>
+                </select>
+              </label>
               <div className="space-y-3 overflow-y-auto max-h-[500px] pr-1">
                 {issueClassFilter && <button type="button" onClick={() => setIssueClassFilter('')} className="underline">目前：{issueClassFilter}，清除考場篩選</button>}
-                {!data.issues.some((i) => !issueClassFilter || i.classId === issueClassFilter) && <p className="p-4 text-slate-600">目前沒有考場通報。</p>}
-                {data.issues.filter((i) => !issueClassFilter || i.classId === issueClassFilter).map((issue) => (
+                {!filteredIssues.length && <p className="p-4 text-slate-600">目前沒有考場通報。</p>}
+                {filteredIssues.map((issue) => (
                   <button
                     type="button"
                     key={issue.id}
@@ -1836,6 +1855,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       </span>
                     </span>
 
+                    <span className="block text-xs font-bold text-teal-800 [overflow-wrap:anywhere]">
+                      {issue.periodId ? issue.periodLabel ?? issuePeriods.get(issue.periodId) : '未分節的舊通報'}
+                    </span>
                     <span className="block text-xs sm:text-sm text-slate-800 font-bold leading-relaxed">
                       {issue.content}
                     </span>
@@ -1852,12 +1874,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
             {/* 右邊：一鍵派遣大按鈕面板 */}
             <div className="lg:col-span-6 bg-white rounded-2xl sm:rounded-3xl border border-teal-200 p-4 sm:p-6 shadow-sm flex flex-col justify-between space-y-5">
               {isReplying && <p role="status" className="text-sm font-bold text-teal-900">正在儲存通報處理結果…</p>}
-              {replyFeedback && replyFeedback.issueId === selectedIssueId && <p role={replyFeedback.error ? 'alert' : 'status'}
+              {replyFeedback && replyFeedback.issueId === selectedIssue?.id && <p role={replyFeedback.error ? 'alert' : 'status'}
                 className={`rounded-xl p-3 text-sm font-bold ${replyFeedback.error ? 'bg-rose-50 text-rose-900' : 'bg-teal-50 text-teal-900'}`}>{replyFeedback.text}</p>}
-              {selectedIssueId ? (
+              {selectedIssue ? (
                 (() => {
-                  const issue = data.issues.find((i) => i.id === selectedIssueId);
-                  if (!issue) return null;
+                  const issue = selectedIssue;
 
                   return (
                     <div className="space-y-4 sm:space-y-5">
@@ -1866,6 +1887,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <h3 className="text-lg sm:text-xl font-black text-slate-900">
                           {issue.className} 考場突發狀況
                         </h3>
+                        <p className="mt-1 text-sm font-bold text-slate-700">
+                          {issue.periodId ? issue.periodLabel ?? issuePeriods.get(issue.periodId) : '未分節的舊通報'}
+                        </p>
                       </div>
 
                       <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">

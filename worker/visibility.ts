@@ -42,7 +42,7 @@ export function visibleClassroom(classroom: ClassroomExamState, session: ExamSes
 }
 
 export function visibleIssue(issue: ExamIssue, session: ExamSession | null) {
-  return canAccessRoom(session, issue.classId);
+  return issue.periodId ? canAccessPeriod(session, issue.classId, issue.periodId) : canAccessRoom(session, issue.classId);
 }
 
 export function activeAnnouncements(state: SystemData, now: number) {
