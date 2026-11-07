@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { examSync } from '../../services/examSync';
 import { escapeCSV } from '../../services/csv';
+import { MAX_IMPORT_BYTES } from '../../types/examImports';
 import { countAbsentReasons, OfficialExamReport } from './OfficialExamReport';
 import { GradeSettings } from './GradeSettings';
 import { ExamScheduleSettings } from './ExamScheduleSettings';
@@ -240,10 +241,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const teacherFeedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(teacherFeedbackTimer.current), []);
 
-  // Batch Import Teachers State
-  const [showBatchImportBox, setShowBatchImportBox] = useState<boolean>(false);
-  const [batchImportText, setBatchImportText] = useState<string>('');
+  const teacherImportDialog = useRef<HTMLDialogElement>(null);
   const [batchImportMode, setBatchImportMode] = useState<'merge' | 'replace'>('merge');
+  const [teacherImportFile, setTeacherImportFile] = useState<{ name: string; text: string }>();
+  const [teacherImportRows, setTeacherImportRows] = useState<TeacherAccountInput[]>();
+  const [teacherImportError, setTeacherImportError] = useState('');
 
   const showTempTeacherMsg = (type: 'ok' | 'err', msg: string) => {
     setTeacherFeedback({ type, msg });
@@ -377,65 +379,53 @@ export const AdminView: React.FC<AdminViewProps> = ({
     return parsed;
   };
 
-  const confirmTeacherImport = (parsed: TeacherAccountInput[], fileName?: string) => confirmAction({
-    title: '確認匯入教師名冊',
-    description: batchImportMode === 'replace'
-      ? '現有教師名冊將以這次匯入的資料取代。'
-      : '符合相同登入帳號的教師資料將更新。',
-    facts: [
-      { label: '匯入方式', value: batchImportMode === 'replace' ? '完全取代' : '合併更新' },
-      { label: '資料筆數', value: `${parsed.length} 筆（每次上限 50）` },
-      { label: '來源', value: fileName ?? '貼上或選檔的文字' },
-      { label: '逐列預覽（不顯示密碼）', value: parsed.map((row, i) => `${i + 1}. ${teachersList.some((t) => t.username === row.username) ? '更新' : '新增'}：${row.name}／${row.username}／${row.department}／${row.assignedClassId || '沿用原預設考場或不指派'}`).join('\n') },
-      ...(batchImportMode === 'replace' ? [{ label: '覆蓋影響', value: `將移除未列入的 ${teachersList.filter((t) => !parsed.some((r) => r.username === t.username)).length} 位教師；相同帳號保留 ID 與出題／分節監考指派。移除仍有指派者會被阻擋。所有匯入帳號密碼會更新。` }] : [])
-    ],
-    confirmLabel: '確認匯入',
-    danger: batchImportMode === 'replace'
-  });
+  const previewTeacherImport = (text: string) => {
+    const parsed = parseTeacherCSVLines(text);
+    if (parsed.length === 0) throw new Error('未解析到有效資料，請確認格式為：教師姓名,登入帳號,登入密碼,科別,指派班級(選填)');
+    if (parsed.some((teacher) => !validTeacherPassword(teacher.password))) {
+      throw new Error('每位教師的密碼須為 12 至 256 字元，且不可過於簡單；請檢查後重新匯入。');
+    }
+    return parsed;
+  };
 
-  const importTeacherText = async (text: string, fileName?: string) => {
-    let parsed: TeacherAccountInput[];
-    try { parsed = parseTeacherCSVLines(text); } catch (error) { showTempTeacherMsg('err', error instanceof Error ? error.message : '名單格式錯誤'); return; }
-    if (parsed.length === 0) {
-      showTempTeacherMsg('err', '未解析到有效資料，請確認格式為：教師姓名,登入帳號,登入密碼,科別,指派班級(選填)');
+  const selectTeacherImportFile = async (selected: File) => {
+    setTeacherImportFile(undefined);
+    setTeacherImportRows(undefined);
+    setTeacherImportError('');
+    if (selected.size > MAX_IMPORT_BYTES) {
+      setTeacherImportError('檔案須小於 256 KB。');
       return;
     }
-    if (parsed.some(teacher => !validTeacherPassword(teacher.password))) {
-      showTempTeacherMsg('err', '每位教師的密碼須為 12 至 256 字元，且不可過於簡單；請檢查後重新匯入。');
-      return;
-    }
-    if (!await confirmTeacherImport(parsed, fileName)) return;
-    setTeacherPending(`正在匯入 ${parsed.length} 位教師帳號…`);
-    setTeacherFeedback(null);
+    let text: string;
     try {
-      const res = await examSync.importTeachers(parsed, batchImportMode);
-      if (!res.success) throw new Error(res.error || '無法匯入教師名冊。');
-      showTempTeacherMsg('ok', `已匯入 ${parsed.length} 位教師帳號。`);
-      if (!fileName) {
-        setBatchImportText('');
-        setShowBatchImportBox(false);
-      }
+      text = new TextDecoder('utf-8', { fatal: true }).decode(await selected.arrayBuffer());
+    } catch {
+      setTeacherImportError('無法讀取檔案。請將 CSV 或 TXT 另存為 UTF-8 編碼後再試。');
+      return;
+    }
+    setTeacherImportFile({ name: selected.name, text });
+    try {
+      setTeacherImportRows(previewTeacherImport(text));
     } catch (error) {
-      showTempTeacherMsg('err', error instanceof Error ? error.message : '無法匯入教師名冊。');
-    } finally {
-      setTeacherPending('');
+      setTeacherImportError(error instanceof Error ? error.message : '名單格式錯誤');
     }
   };
 
-  const handleFileUploadImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || teacherPending) return;
-    setTeacherPending('正在讀取教師名冊檔案…');
+  const confirmTeacherFileImport = async () => {
+    if (!teacherImportRows?.length || teacherPending) return;
+    setTeacherPending(`正在匯入 ${teacherImportRows.length} 位教師帳號…`);
     setTeacherFeedback(null);
+    setTeacherImportError('');
     try {
-      const text = await file.text();
-      setTeacherPending('');
-      setBatchImportText(text); setShowBatchImportBox(true);
-      showTempTeacherMsg('ok', `已讀取 ${file.name}，請確認模式，再按預覽並匯入。`);
-    } catch {
-      showTempTeacherMsg('err', '讀取檔案失敗，請確認為 UTF-8 編碼之 CSV 或 TXT 檔');
+      const res = await examSync.importTeachers(teacherImportRows, batchImportMode);
+      if (!res.success) throw new Error(res.error || '無法匯入教師名冊。');
+      showTempTeacherMsg('ok', `已匯入 ${teacherImportRows.length} 位教師帳號。`);
+      teacherImportDialog.current?.close();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '無法匯入教師名冊。';
+      setTeacherImportError(message);
+      showTempTeacherMsg('err', message);
     } finally {
-      e.target.value = '';
       setTeacherPending('');
     }
   };
@@ -2108,40 +2098,25 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
                 </div>
 
-                <label className="block text-sm font-bold">匯入方式（檔案與貼上共用；每次上限 50 筆）
-                  <select value={batchImportMode} onChange={(e) => setBatchImportMode(e.target.value as 'merge' | 'replace')} className="ml-2 rounded border p-2">
-                    <option value="merge">合併新增／更新</option><option value="replace">覆蓋名冊（未列入者將移除）</option>
-                  </select>
-                </label>
                 {/* 批次匯入、範本下載與前往指派頁操作列 */}
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" onClick={() => openTeacherForm()}
                     className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-teal-800 px-3.5 text-xs font-black text-white hover:bg-teal-900 sm:text-sm">
                     <UserPlus size={17} aria-hidden="true" />新增教師帳號與出題指派
                   </button>
-                  <label className="min-h-[40px] px-3.5 py-2 rounded-xl border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-900 text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-teal-700">
-                    <Upload className="w-4 h-4" />
-                    <span>上傳 CSV / TXT 匯入全校教師</span>
-                    <input
-                      type="file"
-                      accept=".csv,.txt"
-                      disabled={Boolean(teacherPending)}
-                      onChange={handleFileUploadImport}
-                      className="sr-only"
-                    />
-                  </label>
-
                   <button
                     type="button"
-                    onClick={() => setShowBatchImportBox(!showBatchImportBox)}
-                    className={`min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer border transition-colors ${
-                      showBatchImportBox
-                        ? 'bg-slate-900 text-white border-slate-900'
-                        : 'bg-teal-50 hover:bg-teal-100 text-teal-900 border-teal-200'
-                    }`}
+                    disabled={Boolean(teacherPending)}
+                    onClick={() => {
+                      setTeacherImportFile(undefined);
+                      setTeacherImportRows(undefined);
+                      setTeacherImportError('');
+                      teacherImportDialog.current?.showModal();
+                    }}
+                    className="min-h-[40px] px-3.5 py-2 rounded-xl border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-900 text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
                   >
-                    <FileEdit className="w-4 h-4" />
-                    <span>{showBatchImportBox ? '收合貼上匯入區' : '貼上名單批次匯入'}</span>
+                    <Upload className="w-4 h-4" aria-hidden="true" />
+                    <span>上傳 CSV / TXT 匯入全校教師</span>
                   </button>
 
                   <button
@@ -2187,76 +2162,78 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </div>
               )}
 
-              {/* 展開式：貼上 CSV / Excel 文字批次匯入區 */}
-              {showBatchImportBox && (
-                <div className="p-4 sm:p-5 rounded-2xl bg-teal-50/60 border border-teal-200 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h4 className="text-sm font-black text-teal-950">
-                        批次貼上全校教師名單與獨立帳密
-                      </h4>
-                      <p className="text-xs font-bold text-teal-900/80 mt-0.5">
-                        每行一位老師，欄位以逗號或 Tab 分隔：
-                        <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-teal-200 ml-1">
-                          教師姓名,獨立登入帳號,登入密碼,任教科別
-                        </code>
+              <dialog ref={teacherImportDialog} aria-labelledby="teacher-import-title"
+                onCancel={(event) => { if (teacherPending) event.preventDefault(); }}
+                onClose={() => { setTeacherImportFile(undefined); setTeacherImportRows(undefined); setTeacherImportError(''); }}
+                className="no-print fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/65"
+              >
+                <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
+                  <header className="shrink-0 border-b border-slate-200 p-4 sm:px-6">
+                    <h3 id="teacher-import-title" className="text-lg font-black">匯入全校教師獨立帳號</h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-700">
+                      上傳 UTF-8 編碼的 CSV 或 TXT。每列一位教師，欄位依序為：教師姓名、獨立登入帳號、獨立登入密碼、任教科別、指派班級代號（選填）。每次最多 50 筆。
+                    </p>
+                  </header>
+                  <div className="min-h-0 space-y-3 overflow-y-auto p-4 sm:px-6">
+                    <label className="block text-sm font-bold">匯入方式
+                      <select value={batchImportMode} disabled={Boolean(teacherPending)} onChange={(event) => setBatchImportMode(event.target.value as 'merge' | 'replace')}
+                        className="mt-1 block w-full rounded-lg border border-slate-300 p-2 text-sm font-bold">
+                        <option value="merge">合併新增／更新</option>
+                        <option value="replace">覆蓋名冊（未列入者將移除）</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm font-bold">選擇 UTF-8 CSV 或 TXT 檔案
+                      <input type="file" accept=".csv,.txt,text/csv,text/plain" disabled={Boolean(teacherPending)}
+                        className="mt-1 block w-full rounded-lg border border-slate-300 p-2 text-sm"
+                        onChange={(event) => {
+                          const selected = event.target.files?.[0];
+                          event.target.value = '';
+                          if (selected) void selectTeacherImportFile(selected);
+                        }} />
+                    </label>
+                    <p className="text-xs text-slate-600">請使用範本的欄位名稱與順序。預覽不會顯示密碼。</p>
+                    {teacherImportFile && <p className="text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">{teacherImportFile.name}</p>}
+                    {teacherPending && <p role="status" className="text-sm text-slate-700">{teacherPending}</p>}
+                    {teacherImportError && <p role="alert" className="rounded-lg bg-rose-50 p-2.5 text-sm font-bold text-rose-900">{teacherImportError}</p>}
+                    {teacherImportError && teacherImportFile && !teacherPending && (
+                      <button type="button" onClick={() => {
+                        try {
+                          setTeacherImportError('');
+                          setTeacherImportRows(previewTeacherImport(teacherImportFile.text));
+                        } catch (error) {
+                          setTeacherImportError(error instanceof Error ? error.message : '名單格式錯誤');
+                        }
+                      }} className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 hover:bg-slate-50">重新預覽</button>
+                    )}
+                    {teacherImportRows && <>
+                      <p role="status" className="text-sm font-bold text-teal-900">
+                        預覽 {teacherImportRows.length} 筆 · 將{batchImportMode === 'replace' ? '覆蓋匯入' : '新增或更新'} {teacherImportRows.length} 筆
+                        {batchImportMode === 'replace' ? ` · 將移除未列入的 ${teachersList.filter((teacher) => !teacherImportRows.some((row) => row.username === teacher.username)).length} 位教師` : ''}
                       </p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-teal-200 text-xs font-black">
-                      <button
-                        type="button"
-                        onClick={() => setBatchImportMode('merge')}
-                        className={`px-2.5 py-1 rounded-lg cursor-pointer ${
-                          batchImportMode === 'merge'
-                            ? 'bg-teal-800 text-white'
-                            : 'text-slate-600'
-                        }`}
-                      >
-                        合併新增/更新現有名冊
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBatchImportMode('replace')}
-                        className={`px-2.5 py-1 rounded-lg cursor-pointer ${
-                          batchImportMode === 'replace'
-                            ? 'bg-rose-700 text-white'
-                            : 'text-slate-600'
-                        }`}
-                      >
-                        覆蓋重設全校名冊
-                      </button>
-                    </div>
+                      {batchImportMode === 'replace' && (
+                        <p className="rounded-lg bg-rose-50 p-2.5 text-sm font-bold text-rose-900">
+                          現有教師名冊將以這次匯入的資料取代。相同帳號會保留識別碼與出題／分節監考指派，但密碼都會更新。仍有監考指派的教師若未列入會被阻擋。
+                        </p>
+                      )}
+                      <ul aria-label="教師名冊匯入預覽" className="divide-y divide-slate-200 rounded-xl border border-slate-200">
+                        {teacherImportRows.map((row, index) => (
+                          <li key={`${row.username}-${index}`} className="flex items-start gap-2 p-2.5 text-sm">
+                            <span className="shrink-0 text-xs font-bold text-teal-900">第 {index + 1} 列 · {teachersList.some((teacher) => teacher.username === row.username) ? '更新' : '新增'}</span>
+                            <span className="min-w-0 [overflow-wrap:anywhere]">{row.name}／{row.username}／{row.department}／{row.assignedClassId || '沿用原預設考場或不指派'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>}
                   </div>
-
-                  <textarea
-                    rows={5}
-                    value={batchImportText}
-                    onChange={(e) => setBatchImportText(e.target.value)}
-                    aria-label="要匯入的教師名冊"
-                    placeholder="教師姓名,獨立登入帳號,獨立登入密碼,任教科別,指派班級代號（選填）"
-                    className="w-full p-3 rounded-xl border border-teal-300 bg-white text-xs sm:text-sm font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-700"
-                  />
-
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowBatchImportBox(false)}
-                      className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-xs font-black text-slate-700 cursor-pointer"
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      disabled={Boolean(teacherPending)}
-                      onClick={() => void importTeacherText(batchImportText)}
-                      className="px-5 py-2 rounded-xl bg-teal-800 hover:bg-teal-900 text-white text-xs font-black cursor-pointer shadow-2xs disabled:opacity-50"
-                    >
-                      預覽並確認匯入教師名冊
-                    </button>
-                  </div>
+                  <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 p-4 sm:px-6">
+                    <button type="button" disabled={Boolean(teacherPending)} onClick={() => teacherImportDialog.current?.close()}
+                      className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50">關閉</button>
+                    <button type="button" disabled={Boolean(teacherPending) || !teacherImportRows?.length}
+                      className={`min-h-11 rounded-xl px-4 text-sm font-bold text-white disabled:opacity-50 ${batchImportMode === 'replace' ? 'bg-rose-700 hover:bg-rose-800' : 'bg-teal-800 hover:bg-teal-900'}`}
+                      onClick={() => void confirmTeacherFileImport()}>確認匯入</button>
+                  </footer>
                 </div>
-              )}
+              </dialog>
 
               <dialog ref={teacherDialog} aria-labelledby="teacher-form-title"
                 onClose={() => setTchPassForm('')}
