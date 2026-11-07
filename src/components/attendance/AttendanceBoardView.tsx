@@ -139,24 +139,32 @@ export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom
         </section>
 
         <div className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap">
-          <button type="button" className={control} onClick={async () => {
+          {mode === 'classroom' && <button type="button" className={control} onClick={async () => {
             if (document.fullscreenElement === boardRef.current) await document.exitFullscreen().catch(() => {});
+            setMode('school');
+            setFullscreenError(false);
             onChooseClassroom();
           }}>
-            <ArrowLeft size={16} aria-hidden="true" />重新選班
-          </button>
+            <ArrowLeft size={16} aria-hidden="true" />返回全校總覽
+          </button>}
           {(['classroom', 'school'] as const).map((item) => (
             <button
               type="button"
               key={item}
               aria-pressed={mode === item}
-              onClick={() => setMode(item)}
+              onClick={async () => {
+                if (item === 'school' && document.fullscreenElement === boardRef.current) {
+                  await document.exitFullscreen().catch(() => {});
+                }
+                setFullscreenError(false);
+                setMode(item);
+              }}
               className={`${control} aria-pressed:border-teal-700 aria-pressed:bg-teal-50 aria-pressed:text-teal-900`}
             >
               {item === 'classroom' ? '單班出席' : '全校總覽'}
             </button>
           ))}
-          {document.fullscreenEnabled && (
+          {mode === 'classroom' && document.fullscreenEnabled && (
             <button type="button" className={`${control} sm:ml-auto`} onClick={toggleFullscreen}>
               {fullscreen ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}
               {fullscreen ? '退出全螢幕' : '全螢幕'}

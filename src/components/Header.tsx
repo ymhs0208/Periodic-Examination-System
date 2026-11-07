@@ -6,11 +6,12 @@ import {
 import type { AdminTab } from './admin/AdminView';
 import type { PolicyView } from './PolicyPage';
 
-export type ActiveView = 'blackboard' | 'attendance' | 'invigilator' | 'admin' | 'login' | PolicyView;
+export type ActiveView = 'blackboard' | 'attendance' | 'academic' | 'invigilator' | 'admin' | 'login' | PolicyView;
 
 export const VIEW_PATHS: Record<ActiveView, string> = {
   blackboard: '/blackboard',
   attendance: '/attendance',
+  academic: '/board/academic',
   invigilator: '/invigilator',
   admin: '/admin',
   login: '/login',
@@ -41,7 +42,10 @@ interface NavigationItem {
   icon: LucideIcon;
 }
 
+const academicItem: NavigationItem = { view: 'academic', label: '教務處看板', description: '全校考場監看、異常優先與投影模式', icon: Monitor };
+
 const adminItems: NavigationItem[] = [
+  academicItem,
   { view: 'admin', label: '教務管理中心', description: '考場總覽、公告與通報處理', icon: Building2 },
   { view: 'admin', tab: 'teachers', label: '教師帳號管理', description: '匯入名冊與管理登入帳號', icon: Users },
   { view: 'admin', tab: 'assign', label: '監考指派', description: '安排各班的監考老師', icon: UserCheck },
@@ -161,14 +165,14 @@ export function Header({
           </span>
         </a>
 
-        <nav aria-label="公開看板" className="col-span-2 row-start-2 grid grid-cols-2 gap-1.5 border-t border-white/10 py-1.5 md:col-span-1 md:col-start-2 md:row-start-1 md:flex md:border-0 md:py-0">
-          {publicItems.map(({ view, label, icon: Icon }) => (
+        <nav aria-label="看板導覽" className={`col-span-2 row-start-2 grid ${isAdminAuthed ? 'grid-cols-2 min-[520px]:grid-cols-3' : 'grid-cols-2'} gap-1.5 border-t border-white/10 py-1.5 md:col-span-1 md:col-start-2 md:row-start-1 md:flex md:border-0 md:py-0`}>
+          {[...publicItems, ...(isAdminAuthed ? [academicItem] : [])].map(({ view, label, icon: Icon }) => (
             <a
               key={view}
               href={VIEW_PATHS[view]}
               aria-current={activeView === view ? 'page' : undefined}
               onClick={(event) => navigate(event, view)}
-              className={`inline-flex min-h-9 items-center justify-center gap-2 rounded-lg px-2.5 text-xs font-bold whitespace-nowrap text-slate-200 hover:bg-white/10 hover:text-white aria-[current=page]:bg-teal-200/15 aria-[current=page]:text-teal-100 sm:px-3 sm:text-sm ${focusStyle}`}
+              className={`${view === 'academic' ? 'col-span-2 min-[520px]:col-span-1' : ''} inline-flex min-h-9 items-center justify-center gap-2 rounded-lg px-2.5 text-xs font-bold whitespace-nowrap text-slate-200 hover:bg-white/10 hover:text-white aria-[current=page]:bg-teal-200/15 aria-[current=page]:text-teal-100 sm:px-3 sm:text-sm ${focusStyle}`}
             >
               <Icon size={16} aria-hidden="true" />{label}
             </a>

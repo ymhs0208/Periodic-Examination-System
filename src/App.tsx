@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ClipboardCheck } from 'lucide-react';
 import { Header, VIEW_PATHS, type ActiveView } from './components/Header';
 import { BlackboardView } from './components/blackboard/BlackboardView';
+import { AcademicBoardView } from './components/academic/AcademicBoardView';
 import { AttendanceBoardView } from './components/attendance/AttendanceBoardView';
 import { ClassroomPicker } from './components/ClassroomPicker';
 import { ScheduledInvigilatorView } from './components/invigilator/InvigilatorView';
@@ -28,6 +29,7 @@ type BoardView = 'blackboard' | 'attendance';
 const pageTitles: Record<ActiveView, string> = {
   blackboard: '教室電子黑板',
   attendance: '出席即時看板',
+  academic: '教務處看板',
   invigilator: '教師工作台',
   admin: '教務管理中心',
   login: '登入',
@@ -75,6 +77,10 @@ function parseRouteFromPathname(pathname: string): {
       view: 'login',
       normalizedPath: '/login'
     };
+  }
+
+  if (first === 'board' && second === 'academic') {
+    return { view: 'academic', normalizedPath: VIEW_PATHS.academic };
   }
 
   if (first === 'attendance') {
@@ -152,6 +158,7 @@ export default function App() {
   const [sessionCheck, setSessionCheck] = useState<'checking' | 'ready' | 'error'>('checking');
   const [connectionError, setConnectionError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [lastDataReceivedAt, setLastDataReceivedAt] = useState<string>();
   const [liveConnection, setLiveConnection] = useState<LiveConnection>('connecting');
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
@@ -259,6 +266,9 @@ export default function App() {
         receivedSnapshot = true;
         setIsLoading(false);
         setConnectionError(false);
+      }
+      if (['INIT_STATE', 'PERIOD_ATTENDANCE_UPDATED', 'ATTENDANCE_UPDATED', 'CLASSROOM_UPDATED', 'CLASSROOM_ADDED', 'ISSUE_REPORTED', 'ISSUE_UPDATED', 'CONFIG_UPDATED'].includes(event)) {
+        setLastDataReceivedAt(new Date().toISOString());
       }
       setSystemData((prev) => {
         if (event === 'INIT_STATE') {
@@ -370,7 +380,10 @@ export default function App() {
       });
     examSync.fetchState(controller.signal)
       .then((data) => {
-        if (active && !receivedSnapshot) setSystemData(data);
+        if (active && !receivedSnapshot) {
+          setSystemData(data);
+          setLastDataReceivedAt(new Date().toISOString());
+        }
       })
       .catch(() => {
         if (active && !receivedSnapshot) setConnectionError(true);
@@ -448,10 +461,15 @@ export default function App() {
     }
 
     // Trigger the Header floating permission menu to open so user immediately sees their permitted buttons
-    setAutoOpenMenuSignal((prev) => prev + 1);
+    if (activeView !== 'academic' && intendedView !== 'academic') setAutoOpenMenuSignal((prev) => prev + 1);
 
     // Navigate to intended view or default portal for their role
-    if (activeView === 'invigilator' || (activeView === 'admin' && authData.role === 'admin')) {
+    if (activeView === 'academic' && authData.role === 'admin') {
+      setIntendedView(null);
+    } else if (intendedView === 'academic' && authData.role === 'admin') {
+      setIntendedView(null);
+      navigateToView('academic');
+    } else if (activeView === 'invigilator' || (activeView === 'admin' && authData.role === 'admin')) {
       setIntendedView(null);
     } else if (intendedView === 'admin' && authData.role === 'admin') {
       setIntendedView(null);
@@ -484,7 +502,7 @@ export default function App() {
   };
 
   const isZeroScrollBoard = boardView === 'blackboard' && !!boardClassroom;
-  const needsSession = activeView === 'admin' || activeView === 'invigilator' || activeView === 'login';
+  const needsSession = activeView === 'academic' || activeView === 'admin' || activeView === 'invigilator' || activeView === 'login';
   const signedInOnLoginPage = activeView === 'login' && session !== null;
   const connectionMessage = {
     connecting: '正在建立即時連線，畫面暫時顯示上次讀取的資料。',
@@ -561,7 +579,7 @@ export default function App() {
           <SystemFeedback title="暫時無法確認登入狀態" detail="請重新載入，系統會再次確認你的登入狀態。" onRetry={retryLoading} />
         ) : (
           <>
-            {connectionMessage && !isZeroScrollBoard && activeView !== 'login' && (
+            {connectionMessage && !isZeroScrollBoard && activeView !== 'academic' && activeView !== 'login' && (
               <p role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-950">{connectionMessage}</p>
             )}
             {/* 獨立路徑 0: /login (獨立登入頁面) */}
@@ -588,12 +606,12 @@ export default function App() {
             )}
 
             {/* 獨立路徑 2: /attendance (考場出席人數即時看板 - 全螢幕免滾動) */}
-            {boardView === 'attendance' && (boardClassroom || (window.location.pathname === '/attendance/school' && systemData.classrooms.length > 0)) && (
+            {boardView === 'attendance' && (boardClassroom || ((currentPath === '/attendance' || currentPath === '/attendance/school') && systemData.classrooms.length > 0)) && (
               <div className="w-full flex-1 min-h-0 flex flex-col lg:overflow-hidden">
                 <AttendanceBoardView
                   data={systemData}
-                  key={window.location.pathname}
-                  initialMode={window.location.pathname === '/attendance/school' ? 'school' : 'classroom'}
+                  key={currentPath}
+                  initialMode={boardClassroom ? 'classroom' : 'school'}
                   selectedClassroom={boardClassroom ?? systemData.classrooms[0]}
                   onSelectClassroom={(classId) => navigateToBoardClass('attendance', classId)}
                   onChooseClassroom={() => navigateToView('attendance')}
@@ -601,9 +619,9 @@ export default function App() {
               </div>
             )}
 
-            {boardView && !boardClassroom && (window.location.pathname !== '/attendance/school' || !systemData.classrooms.length) && (
+            {boardView && !boardClassroom && (boardView !== 'attendance' || (currentPath !== '/attendance' && currentPath !== '/attendance/school') || !systemData.classrooms.length) && (
               <>
-              {boardView === 'attendance' && <a href="/attendance/school" className="mb-4 block rounded-xl bg-teal-800 p-4 text-center font-bold text-white">開啟全校總覽</a>}
+              {boardView === 'attendance' && systemData.classrooms.length > 0 && <a href="/attendance/school" className="mb-4 block rounded-xl bg-teal-800 p-4 text-center font-bold text-white">開啟全校總覽</a>}
               <ClassroomPicker
                 board={boardView}
                 classrooms={systemData.classrooms}
@@ -611,6 +629,17 @@ export default function App() {
                 onSelectClassroom={(classId) => navigateToBoardClass(boardView, classId)}
               />
               </>
+            )}
+
+            {activeView === 'academic' && (
+              isAdminAuthed ? <AcademicBoardView data={systemData} liveConnection={liveConnection}
+                lastDataReceivedAt={lastDataReceivedAt} onReconnect={() => examSync.reconnect()}
+                onOpenOperations={() => navigateToView('admin')} />
+              : <>
+                  {session && <p role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 font-bold text-amber-950">教務處看板僅供教務管理員使用。請改用教務管理員帳號登入。</p>}
+                  <LoginPage config={systemData.config} intendedView="academic"
+                    onLoginSuccess={handleLoginSuccess} onNavigateView={navigateToView} />
+                </>
             )}
 
             {/* 獨立路徑 3: /invigilator (監考老師點名端) */}

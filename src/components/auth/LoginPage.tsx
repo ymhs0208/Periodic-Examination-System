@@ -48,7 +48,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setIsSubmitting(true);
     try {
       const res = await examSync.login({
-        role: intendedView === 'admin' ? 'admin' : 'invigilator',
+        role: (intendedView === 'admin' || intendedView === 'academic') ? 'admin' : 'invigilator',
         username: username.trim(),
         password: password.trim()
       });
@@ -65,7 +65,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     }
   };
 
-  const isAdminLogin = intendedView === 'admin';
+  const isAdminLogin = (intendedView === 'admin' || intendedView === 'academic');
 
   return (
     <div className="mx-auto my-2 grid w-full max-w-[1060px] overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-[0_16px_48px_-28px_#10243d50] sm:my-8 md:grid-cols-[minmax(0,1fr)_minmax(0,0.88fr)]">
@@ -76,7 +76,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               <GraduationCap size={17} aria-hidden="true" />考務工作台
             </p>
             <h1 id="login-title" className="text-[1.75rem] font-black leading-tight tracking-tight text-[#10243d] sm:text-4xl">
-              {isAdminLogin ? '教務管理中心登入' : intendedView === 'invigilator' ? '教師登入' : '登入考務帳號'}
+              {intendedView === 'academic' ? '教務處看板登入' : isAdminLogin ? '教務管理中心登入' : intendedView === 'invigilator' ? '教師登入' : '登入考務帳號'}
             </h1>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               {isAdminLogin ? '請使用教務管理員帳號登入。' : '請輸入教務處提供的帳號與密碼。'}
