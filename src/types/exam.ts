@@ -2,6 +2,8 @@ export type IssueType = 'general' | 'medical' | 'paper' | 'facility' | 'violatio
 export type IssueStatus = 'pending' | 'processing' | 'resolved';
 
 export const ABSENCE_REASONS = ['病假', '事假', '喪假', '公假', '曠課'];
+export const EXAM_RESET_CONFIRMATION = '刪除';
+export type ExamResetScope = 'current' | 'all';
 export const MIN_ADMIN_PASSWORD_LENGTH = 8;
 export const MIN_TEACHER_PASSWORD_LENGTH = 12;
 export function validTeacherPassword(password: unknown): password is string {
@@ -136,6 +138,7 @@ export interface ExamConfig {
 }
 
 export interface SystemData {
+  resetId?: string;
   config: ExamConfig;
   classrooms: ClassroomExamState[];
   teachers?: TeacherAccount[];

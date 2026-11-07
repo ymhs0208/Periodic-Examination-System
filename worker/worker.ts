@@ -4,7 +4,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { Hono, type Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { bodyLimit } from 'hono/body-limit';
-import { createEmptyExamState, MIN_ADMIN_PASSWORD_LENGTH } from '../src/types/exam';
+import { createEmptyExamState, EXAM_RESET_CONFIRMATION, MIN_ADMIN_PASSWORD_LENGTH } from '../src/types/exam';
 import type { AbsentStudent, AdminAccounts, ClassroomExamState, CorrectionProposal, ExamAttendance, ExamIssue, ExamSession, SystemData } from '../src/types/exam';
 import { examPeriods, invigilationConflicts, LEGACY_PERIOD_ID, periodApplies } from '../src/types/examSchedule';
 import { announcementStatus, nextAnnouncementBoundary } from '../src/types/announcements';
@@ -208,6 +208,7 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
         const invalid = validateMutation(path, method, body, state);
         if (invalid) return c.json({ success: false, error: invalid }, 400);
         const sensitive = method !== 'GET' && (
+          path === '/api/exam/reset' ||
           /^\/api\/auth\/(admins|credentials)(?:\/|$)/.test(path) ||
           /^\/api\/exam\/teachers(?:\/|$)/.test(path) ||
           (path.startsWith('/api/exam/import/') && !!body.expectedVersion));
@@ -280,6 +281,49 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
     this.router.get('/api/exam/state', (c) =>
       c.json({ success: true, data: visibleState(c.get('state'), this.getSession(getCookie(c, sessionCookie(c.req.url)), c.get('state'))) })
     );
+
+    this.router.post('/api/exam/reset', (c) => {
+      const session = c.get('session');
+      if (session?.role !== 'admin') {
+        return c.json({ success: false, error: '只有管理員可以重設考務資料' }, 403);
+      }
+      const { scope, confirmation, expectedResetId } = c.get('body');
+      if (scope !== 'current' && scope !== 'all') {
+        return c.json({ success: false, error: '請選擇要清除的資料範圍' }, 400);
+      }
+      if (confirmation !== EXAM_RESET_CONFIRMATION) {
+        return c.json({ success: false, error: `請輸入「${EXAM_RESET_CONFIRMATION}」確認重設` }, 400);
+      }
+      const previous = c.get('state');
+      if (expectedResetId !== (previous.resetId ?? null)) {
+        return c.json({ success: false, error: '考務資料已由其他操作重設，請重新載入後核對。' }, 409);
+      }
+
+      const state: StoredExamState = { ...createEmptyExamState(), resetId: crypto.randomUUID() };
+      if (scope === 'current') {
+        const { schoolName, academicYear, gradeLabels, rulesNotes } = previous.config;
+        Object.assign(state.config, { schoolName, academicYear, gradeLabels, rulesNotes });
+        state.classrooms = previous.classrooms.map(({ classId, className, grade, totalSeats, expectedCount }) => ({
+          classId, className, grade, totalSeats, expectedCount,
+          invigilator: '待指派監考老師', presentCount: 0, absentCount: 0, absentStudents: [],
+          statusReported: false, lastUpdated: ''
+        }));
+        state.teachers = previous.teachers?.map((teacher) => ({ ...teacher, assignedClassId: '', examAuthorAssignments: [] })) ?? [];
+      }
+      const sql = this.ctx.storage.sql;
+      this.ctx.storage.transactionSync(() => {
+        this.ctx.storage.kv.put(STATE_KEY, state);
+        sql.exec('DELETE FROM exam_period_attendance');
+        if (scope === 'all') {
+          sql.exec("DELETE FROM session_security WHERE token IN (SELECT token FROM sessions_v2 WHERE role = 'invigilator')");
+          sql.exec("DELETE FROM sessions_v2 WHERE role = 'invigilator'");
+        }
+        this.recordAudit(session, scope === 'current' ? 'examClearCurrent' : 'examReset');
+      });
+      this.broadcast({ event: 'INIT_STATE', payload: state }, state);
+      this.ctx.waitUntil(this.scheduleNextAlarm(state, Date.now(), false));
+      return c.json({ success: true });
+    });
 
     this.router.get('/api/auth/session', (c) =>
       c.json({ success: true, data: this.getSession(getCookie(c, sessionCookie(c.req.url)), c.get('state')) })

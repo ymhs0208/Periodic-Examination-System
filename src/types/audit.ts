@@ -23,6 +23,8 @@ export const auditActions = {
   announcementPublish: '發布考務公告',
   announcementDelete: '撤回考務公告',
   examSettings: '更新考務設定',
+  examReset: '重設全部考務資料',
+  examClearCurrent: '清除本次段考資料',
   schedule: '儲存考程表',
   grade: '調整年級設定',
   csvImport: '匯入 CSV'

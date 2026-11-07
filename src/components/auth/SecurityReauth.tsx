@@ -38,7 +38,7 @@ export function SecurityReauth() {
   return <dialog ref={dialog} aria-labelledby="reauth-title" onCancel={event => { event.preventDefault(); if (!busy) finish(false); }} className="rounded-2xl p-6 w-[min(95vw,420px)] backdrop:bg-black/40">
     <form onSubmit={submit} className="flex flex-col gap-4">
       <h2 id="reauth-title" className="text-lg font-bold">確認管理員身分</h2>
-      <p className="text-sm">帳號變更或名冊匯入需要最近 5 分鐘內的驗證。驗證成功後會繼續原操作。</p>
+      <p className="text-sm">此操作需要最近 5 分鐘內的管理員驗證。驗證成功後會繼續原操作。</p>
       <label className="text-sm font-bold">目前管理員密碼
         <input autoFocus type="password" autoComplete="current-password" required maxLength={256} value={password} onChange={e => setPassword(e.target.value)} disabled={busy} className="block w-full border rounded-lg p-2 mt-1" />
       </label>

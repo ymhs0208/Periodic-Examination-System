@@ -105,7 +105,92 @@ test('isolated Worker: REST/WS privacy, auth, audit, headers, recent verificatio
     const logs=(await request('/api/admin/audit-logs','GET',undefined,adminCookie)).data.data.entries;
     for(const action of ['accessDenied','loginFailed','reauthenticate'])assert.ok(logs.some(e=>e.action===action),action);
     assert.ok(logs.every(e=>!JSON.stringify(e).includes(password)));
-    for(let i=sockets.length;i<8;i++) await wsSnapshot();
+
+    assert.equal((await adminRequest('/api/exam/config','PATCH',{
+      schoolName:'測試學校',academicYear:'115',examName:'測試段考',rulesNotes:['測試考場守則']
+    })).res.status,200);
+    assert.equal((await adminRequest('/api/exam/announcement','POST',{title:'測試公告',content:'測試內容'})).res.status,200);
+    assert.equal((await request('/api/exam/issue','POST',{classId:'test-room',periodId:'first',content:'測試通報'},teacherCookie)).res.status,200);
+    assert.equal((await adminRequest('/api/exam/teachers','POST',{id:teacherId,name:'測試教師',username:'local-test-teacher',
+      examAuthorAssignments:[{subject:'數學',grade:9}]})).res.status,200);
+    assert.equal((await request('/api/exam/corrections','POST',{
+      subject:'數學',targetAudience:'grade_9',title:'測試更正',content:'測試內容'
+    },teacherCookie)).res.status,200);
+
+    const resetPath='/api/exam/reset';
+    const resetBody={scope:'all',confirmation:'刪除',expectedResetId:null};
+    assert.equal((await request(resetPath,'POST',resetBody)).res.status,401);
+    assert.equal((await request(resetPath,'POST',resetBody,teacherCookie)).res.status,403);
+    assert.equal((await request(resetPath,'POST',{...resetBody,scope:'current'},teacherCookie)).res.status,403);
+    assert.equal((await adminRequest(resetPath,'POST',{...resetBody,scope:undefined})).res.status,400);
+    assert.equal((await adminRequest(resetPath,'POST',{...resetBody,confirmation:' 刪除 '})).res.status,400);
+    const beforeReset=(await request('/api/exam/state','GET',undefined,adminCookie)).data.data;
+    assert.equal(beforeReset.classrooms.length,1);
+    assert.equal(beforeReset.correctionProposals.length,1);
+    await wait(1200);
+    assert.equal((await request(resetPath,'POST',resetBody,adminCookie)).res.status,428);
+    assert.equal((await request('/api/auth/reauth','POST',{password},adminCookie)).res.status,200);
+
+    const teacherCurrentReset=nextEvent(teacher.ws);
+    assert.equal((await adminRequest(resetPath,'POST',{...resetBody,scope:'current'})).res.status,200);
+    const currentResetEvent=await teacherCurrentReset;
+    assert.equal(currentResetEvent.event,'INIT_STATE');
+    assert.equal(currentResetEvent.session.role,'invigilator');
+    assert.deepEqual(currentResetEvent.session.invigilation,[]);
+    assert.equal(currentResetEvent.session.canSubmitCorrections,false);
+    const cleared=(await request('/api/exam/state','GET',undefined,adminCookie)).data.data;
+    assert.equal(cleared.resetId,currentResetEvent.payload.resetId);
+    assert.equal(cleared.config.schoolName,'測試學校');
+    assert.equal(cleared.config.academicYear,'115');
+    assert.deepEqual(cleared.config.rulesNotes,['測試考場守則']);
+    assert.equal(cleared.config.examName,'');
+    assert.equal(cleared.config.periods,undefined);
+    for(const key of ['announcements','issues','correctionProposals']) assert.equal(cleared[key]?.length ?? 0,0,key);
+    assert.deepEqual(cleared.teachers.map(({id,assignedClassId,examAuthorAssignments})=>({id,assignedClassId,examAuthorAssignments})),[
+      {id:teacherId,assignedClassId:'',examAuthorAssignments:[]}
+    ]);
+    assert.equal(cleared.classrooms[0].classId,'test-room');
+    assert.equal(cleared.classrooms[0].expectedCount,31);
+    assert.equal(cleared.classrooms[0].statusReported,false);
+    assert.deepEqual(cleared.classrooms[0].absentStudents,[]);
+    assert.equal(cleared.classrooms[0].periodAttendance,undefined);
+    assert.equal(cleared.classrooms[0].periodInvigilators,undefined);
+    assert.equal((await request('/api/auth/session','GET',undefined,teacherCookie)).data.data.teacherId,teacherId);
+    assert.equal((await adminRequest('/api/exam/periods','PATCH',{expectedPeriods:[],periods})).res.status,200);
+    assert.equal((await adminRequest('/api/exam/attendance','POST',{
+      ...firstAttendance,expectedCount:31,presentCount:30
+    })).res.status,200);
+
+    const publicReset=nextEvent(anon.ws);
+    const teacherDisconnected=new Promise((resolve) => teacher.ws.addEventListener('close',resolve,{once:true}));
+    assert.equal((await adminRequest(resetPath,'POST',{...resetBody,expectedResetId:cleared.resetId})).res.status,200);
+    const resetEvent=await publicReset;
+    assert.equal(resetEvent.event,'INIT_STATE');
+    assert.deepEqual(resetEvent.payload.classrooms,[]);
+    await teacherDisconnected;
+    assert.equal((await request('/api/auth/session','GET',undefined,teacherCookie)).data.data,null);
+    assert.equal((await request('/api/auth/session','GET',undefined,adminCookie)).data.data.role,'admin');
+    assert.equal((await request('/api/auth/admins','GET',undefined,adminCookie)).data.data.accounts.length,2);
+    const afterReset=(await request('/api/exam/state','GET',undefined,adminCookie)).data.data;
+    assert.notEqual(afterReset.resetId,undefined);
+    assert.equal(afterReset.resetId,resetEvent.payload.resetId);
+    assert.equal(afterReset.config.schoolName,'');
+    assert.equal(afterReset.config.periods,undefined);
+    for(const key of ['classrooms','teachers','announcements','issues','correctionProposals']) assert.equal(afterReset[key]?.length ?? 0,0,key);
+    const resetLogs=(await request('/api/admin/audit-logs','GET',undefined,adminCookie)).data.data.entries;
+    assert.ok(resetLogs.some(entry=>entry.action==='examReset'));
+    assert.ok(resetLogs.some(entry=>entry.action==='examClearCurrent'));
+    assert.ok(resetLogs.some(entry=>entry.action==='announcementPublish'));
+    assert.equal((await adminRequest('/api/exam/classroom','POST',{
+      classId:'test-room',grade:9,className:'重建考場',invigilator:'測試監考',expectedCount:30
+    })).res.status,200);
+    assert.equal((await adminRequest('/api/exam/periods','PATCH',{expectedPeriods:[],periods})).res.status,200);
+    assert.equal((await adminRequest(resetPath,'POST',resetBody)).res.status,409);
+    const recreated=(await request('/api/exam/state','GET',undefined,adminCookie)).data.data;
+    assert.equal(recreated.classrooms.length,1);
+    assert.equal(recreated.classrooms[0].periodAttendance,undefined);
+
+    for(let i=sockets.filter(ws=>ws.readyState===WebSocket.OPEN).length;i<8;i++) await wsSnapshot();
     const quota=await mf.dispatchFetch('http://localhost/ws',{headers:{Upgrade:'websocket'}});assert.equal(quota.status,429);
     let limited=false;
     for(let i=0;i<241;i++){const r=await request('/api/exam/state');if(r.res.status===429){limited=true;assert.equal(r.res.headers.get('Retry-After'),'60');break;}}

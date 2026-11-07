@@ -6,10 +6,13 @@ interface Confirmation {
   facts: { label: string; value: string | number }[];
   confirmLabel: string;
   danger?: boolean;
+  requiredText?: string;
 }
 
 export function useActionConfirmation() {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [enteredText, setEnteredText] = useState('');
+  const canConfirm = !confirmation?.requiredText || enteredText === confirmation.requiredText;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const resolveRef = useRef<((confirmed: boolean) => void) | null>(null);
@@ -32,11 +35,13 @@ export function useActionConfirmation() {
     if (resolveRef.current) return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
       resolveRef.current = resolve;
+      setEnteredText('');
       setConfirmation(request);
     });
   };
 
   const finish = (confirmed: boolean) => {
+    if (confirmed && !canConfirm) return;
     const resolve = resolveRef.current;
     dialogRef.current?.close();
     resolveRef.current = null;
@@ -71,14 +76,21 @@ export function useActionConfirmation() {
               </div>
             ))}
           </dl>
+          {confirmation.requiredText && (
+            <label className="mt-4 block text-sm font-bold text-slate-900">
+              輸入「{confirmation.requiredText}」以確認
+              <input type="text" autoComplete="off" value={enteredText} onChange={(event) => setEnteredText(event.target.value)}
+                className="mt-1.5 block min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-base" />
+            </label>
+          )}
         </div>
         <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-4 py-3 sm:px-6">
           <button ref={cancelRef} type="button" onClick={() => finish(false)}
             className="min-h-11 cursor-pointer rounded-xl border border-slate-300 px-4 text-sm font-bold hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700">
             取消
           </button>
-          <button type="button" onClick={() => finish(true)}
-            className={`min-h-11 cursor-pointer rounded-xl px-4 text-sm font-bold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 ${confirmation.danger ? 'bg-rose-800 hover:bg-rose-900' : 'bg-teal-800 hover:bg-teal-900'}`}>
+          <button type="button" onClick={() => finish(true)} disabled={!canConfirm}
+            className={`min-h-11 cursor-pointer rounded-xl px-4 text-sm font-bold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-default disabled:opacity-50 ${confirmation.danger ? 'bg-rose-800 hover:bg-rose-900' : 'bg-teal-800 hover:bg-teal-900'}`}>
             {confirmation.confirmLabel}
           </button>
         </footer>

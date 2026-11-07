@@ -183,17 +183,18 @@ export default function App() {
   const isAdminAuthed = session?.role === 'admin';
   const isInvigilatorAuthed = session?.role === 'invigilator' || isAdminAuthed;
   const accountId = isAdminAuthed ? session.adminId : session?.teacherId;
-  const attendanceDraftOwner = accountId ? `${session?.role}:${accountId}` : undefined;
   const invigilatorTab = requestedInvigilatorTab ?? (session?.role === 'invigilator' ? 'assignments' : 'attendance');
   const loggedInUsername = session?.username || '';
   const mainRef = useRef<HTMLElement>(null);
   const previousNavigation = useRef(currentPath);
 
   const [systemData, setSystemData] = useState<SystemData>(createEmptyExamState);
+  const draftGeneration = systemData.resetId ? `:${systemData.resetId}` : '';
+  const attendanceDraftOwner = accountId ? `${session?.role}:${accountId}${draftGeneration}` : undefined;
 
   useEffect(() => {
-    if (sessionCheck === 'ready') discardOtherAttendanceDrafts(attendanceDraftOwner);
-  }, [attendanceDraftOwner, sessionCheck]);
+    if (sessionCheck === 'ready' && !isLoading && !connectionError) discardOtherAttendanceDrafts(attendanceDraftOwner);
+  }, [attendanceDraftOwner, sessionCheck, isLoading, connectionError]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -709,7 +710,7 @@ export default function App() {
                           {correctionSubmission ?? <p className="wb-panel text-sm text-slate-700">此帳號尚未取得試題更正送審權限。</p>}
                         </>
                       ) : invigilatorClassroom && invigilatorTab !== 'assignments' ? (
-                        <ScheduledInvigilatorView key={JSON.stringify([session?.role, accountId ?? session?.username, invigilatorClassroom.classId])}
+                        <ScheduledInvigilatorView key={JSON.stringify([session?.role, attendanceDraftOwner ?? session?.username, invigilatorClassroom.classId])}
                           tab={invigilatorTab}
                           attendanceDraftOwner={attendanceDraftOwner}
                           classroom={invigilatorClassroom}

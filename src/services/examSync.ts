@@ -10,6 +10,7 @@ import type {
   ExamConfig,
   ExamAttendance,
   ExamPeriod,
+  ExamResetScope,
   ExamSession,
   AdminAccounts
 } from '../types/exam';
@@ -506,6 +507,14 @@ class ExamSyncService {
 
   public async logout(): Promise<void> {
     await this.readData(await this.request('/api/auth/logout', { method: 'POST' }));
+  }
+
+  public async resetExamData(scope: ExamResetScope, confirmation: string, expectedResetId: string | null): Promise<void> {
+    await this.readData(await this.request('/api/exam/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, confirmation, expectedResetId })
+    }));
   }
 
   public async getAdminAccounts(): Promise<AdminAccounts> {

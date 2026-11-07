@@ -41,6 +41,7 @@ import { ExamScheduleSettings } from './ExamScheduleSettings';
 import { ClassroomSettings } from './ClassroomSettings';
 import { AdminSettingsNavigation, type AdminSettingsPage } from './AdminSettingsNavigation';
 import { AdminAccountsSettings } from './AdminAccountsSettings';
+import { ExamResetSettings } from './ExamResetSettings';
 import { AuditLogView } from './AuditLogView';
 import { ExamPeriodSelect, useExamClock } from '../ExamPeriodSelect';
 import { dataForPeriod, periodLabel, preferredPeriod, reportingPeriods, scheduledExamSubjects, invigilatorForPeriod, examPeriods, periodApplies } from '../../types/examSchedule';
@@ -109,6 +110,10 @@ const announcementStates = {
 };
 const broadcastField = 'mt-1.5 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-950 sm:text-sm';
 const broadcastCard = 'min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6';
+const teacherAction = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 hover:border-teal-300 hover:bg-teal-50 disabled:opacity-50';
+const teacherPrimary = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-teal-800 px-3 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50';
+const teacherRowColumns = 'xl:grid-cols-[minmax(0,1.25fr)_minmax(0,.75fr)_minmax(0,1fr)_minmax(0,1.4fr)_10rem]';
+const teacherInput = 'block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-950 sm:text-sm';
 
 function parseAnnouncementTime(value: string) {
   if (!value) return undefined;
@@ -246,12 +251,26 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [teacherSearch, setTeacherSearch] = useState<string>('');
   const [teacherAssignFilter, setTeacherAssignFilter] = useState<'all' | 'assigned' | 'unassigned'>('all');
 
-  const teacherSlots = (teacher: TeacherAccount) => sourceData.classrooms.flatMap((room) =>
-    examPeriods(sourceData.config).filter((period) => periodApplies(period, room) && invigilatorForPeriod(room, period.id, teachersList)?.id === teacher.id)
-      .map((period) => `${room.className} · ${periodLabel(period)}`));
-  const hasAssignment = (teacher: TeacherAccount) => teacherSlots(teacher).length > 0;
+  const teacherSlots = new Map<string, string[]>();
+  if (activeTab === 'teachers') {
+    const scheduled = examPeriods(sourceData.config);
+    for (const room of sourceData.classrooms) {
+      for (const period of scheduled.filter((item) => periodApplies(item, room))) {
+        const teacher = invigilatorForPeriod(room, period.id, teachersList);
+        if (!teacher) continue;
+        const slots = teacherSlots.get(teacher.id) ?? [];
+        slots.push(`${room.className} · ${periodLabel(period)}`);
+        teacherSlots.set(teacher.id, slots);
+      }
+    }
+  }
+  const teacherFilters = [
+    { id: 'all', label: '全校教師', count: teachersList.length },
+    { id: 'assigned', label: '已排班', count: teacherSlots.size },
+    { id: 'unassigned', label: '未排班', count: teachersList.length - teacherSlots.size }
+  ] as const;
   const visibleTeachers = teachersList.filter((teacher) =>
-    (teacherAssignFilter === 'all' || (teacherAssignFilter === 'assigned') === hasAssignment(teacher)) &&
+    (teacherAssignFilter === 'all' || (teacherAssignFilter === 'assigned') === teacherSlots.has(teacher.id)) &&
     (!teacherSearch.trim() || [teacher.name, teacher.username, teacher.department ?? ''].some((value) => value.toLowerCase().includes(teacherSearch.trim().toLowerCase()))));
 
   // Single Teacher Add/Edit Form
@@ -277,10 +296,19 @@ export const AdminView: React.FC<AdminViewProps> = ({
   useEffect(() => () => clearTimeout(teacherFeedbackTimer.current), []);
 
   const teacherImportDialog = useRef<HTMLDialogElement>(null);
+  const teacherImportSelection = useRef(0);
   const [batchImportMode, setBatchImportMode] = useState<'merge' | 'replace'>('merge');
   const [teacherImportFile, setTeacherImportFile] = useState<{ name: string; text: string }>();
   const [teacherImportRows, setTeacherImportRows] = useState<TeacherAccountInput[]>();
   const [teacherImportError, setTeacherImportError] = useState('');
+  const openTeacherImport = () => {
+    teacherImportSelection.current++;
+    setBatchImportMode('merge');
+    setTeacherImportFile(undefined);
+    setTeacherImportRows(undefined);
+    setTeacherImportError('');
+    teacherImportDialog.current?.showModal();
+  };
 
   const showTempTeacherMsg = (type: 'ok' | 'err', msg: string) => {
     setTeacherFeedback({ type, msg });
@@ -424,6 +452,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   const selectTeacherImportFile = async (selected: File) => {
+    const selection = ++teacherImportSelection.current;
     setTeacherImportFile(undefined);
     setTeacherImportRows(undefined);
     setTeacherImportError('');
@@ -435,9 +464,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
     try {
       text = new TextDecoder('utf-8', { fatal: true }).decode(await selected.arrayBuffer());
     } catch {
-      setTeacherImportError('無法讀取檔案。請將 CSV 或 TXT 另存為 UTF-8 編碼後再試。');
+      if (selection === teacherImportSelection.current) setTeacherImportError('無法讀取檔案。請將 CSV 或 TXT 另存為 UTF-8 編碼後再試。');
       return;
     }
+    if (selection !== teacherImportSelection.current || !teacherImportDialog.current?.open) return;
     setTeacherImportFile({ name: selected.name, text });
     try {
       setTeacherImportRows(previewTeacherImport(text));
@@ -1256,7 +1286,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   return (
     <div className={`print-report-root ${activeTab === 'reports' ? 'official-report-layout' : ''} flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm ${isEmbedded ? 'xl:h-[820px] xl:overflow-y-auto' : ''}`}>
       {confirmationDialog}
-      <section className={`attendance-banner no-print relative isolate overflow-hidden px-4 text-white sm:px-7 ${activeTab === 'broadcast' ? 'py-4' : 'py-5 sm:py-7'}`}>
+      <section className={`attendance-banner no-print relative isolate overflow-hidden px-4 text-white sm:px-7 ${activeTab === 'broadcast' || activeTab === 'teachers' ? 'py-4' : 'py-5 sm:py-7'}`}>
         <div className="attendance-banner-pattern pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3" aria-hidden="true" />
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
@@ -1282,7 +1312,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       </section>
 
-      <nav aria-label="教務功能" className={`no-print grid grid-cols-2 gap-2 border-b border-slate-200 bg-white p-3 sm:grid-cols-4 sm:px-6 ${activeTab === 'broadcast' ? 'xl:grid-cols-8' : 'xl:grid-cols-7'}`}>
+      <nav aria-label="教務功能" className={`no-print grid grid-cols-2 gap-2 border-b border-slate-200 bg-white p-3 sm:grid-cols-4 sm:px-6 ${activeTab === 'broadcast' || activeTab === 'teachers' ? 'xl:grid-cols-8' : 'xl:grid-cols-7'}`}>
         {sections.filter((section) => !isEmbedded || section.id !== 'reports').map((section) => {
           const Icon = section.icon;
           return (
@@ -1303,7 +1333,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       </nav>
 
       <div className="min-w-0 flex-1 bg-slate-50 p-3 sm:p-6 lg:p-7 xl:overflow-y-auto">
-        <div hidden={activeTab === 'broadcast'} className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div hidden={activeTab === 'broadcast' || activeTab === 'teachers'} className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-teal-200 bg-teal-50 text-teal-800"><CurrentIcon size={19} aria-hidden="true" /></span>
             <div>
@@ -2172,436 +2202,386 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <ClassroomSettings data={sourceData} onManageInvigilation={() => setActiveTab('assign')} />
             )}
             {activeSettingsPage === 'credentials' && <AdminAccountsSettings />}
+            {activeSettingsPage === 'reset' && <ExamResetSettings data={sourceData} />}
           </div>
         )}
 
         {/* TAB 5: 全校監考教師名冊匯入與獨立帳號管理 (獨立頁面 /admin/teachers) */}
         {activeTab === 'teachers' && (
-          <div className="space-y-5">
-            <div className="bg-white rounded-2xl sm:rounded-3xl border border-teal-200 p-4 sm:p-6 shadow-sm space-y-5">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-teal-50 border border-teal-200 text-teal-800 flex items-center justify-center shrink-0">
-                    <UserPlus className="w-5 h-5" />
-                  </div>
+         <div className="space-y-4 sm:space-y-5">
+            <header className="rounded-2xl border border-teal-200 bg-linear-to-br from-white via-teal-50 to-sky-50 p-4 sm:p-6">
+              <p className="flex items-center gap-2 text-sm font-bold text-teal-800"><Users size={17} aria-hidden="true" />教師帳號管理</p>
+              <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">全校監考教師名冊</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-700">從檔案一次匯入多位教師，或管理個別登入帳號與出題指派。</p>
+            </header>
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              <section aria-labelledby="teacher-batch-title" className="flex min-w-0 flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <div className="flex items-start gap-3">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-teal-100 text-teal-900"><Upload size={19} aria-hidden="true" /></span>
                   <div>
-                    <h3 className="text-lg sm:text-xl font-black text-slate-900">
-                      全校監考教師名冊匯入與獨立帳號管理
-                    </h3>
-                    <p className="text-xs text-slate-600 font-bold mt-0.5">
-                      建立與匯入全校教師專屬的獨立登入帳號與密碼（考場排班指派請至「監考指派」頁面操作）
-                    </p>
+                    <h3 id="teacher-batch-title" className="font-black text-slate-950">批次匯入與匯出</h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-700">使用 CSV 或 TXT，每次最多匯入 50 位教師。</p>
                   </div>
                 </div>
-
-                {/* 批次匯入、範本下載與前往指派頁操作列 */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={() => openTeacherForm()}
-                    className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-teal-800 px-3.5 text-xs font-black text-white hover:bg-teal-900 sm:text-sm">
-                    <UserPlus size={17} aria-hidden="true" />新增教師帳號與出題指派
+                <div className="mt-auto flex flex-wrap gap-2">
+                  <button type="button" disabled={Boolean(teacherPending)} onClick={openTeacherImport} className={teacherPrimary}>
+                    <Upload size={17} aria-hidden="true" />匯入教師名冊
                   </button>
-                  <button
-                    type="button"
-                    disabled={Boolean(teacherPending)}
-                    onClick={() => {
-                      setTeacherImportFile(undefined);
-                      setTeacherImportRows(undefined);
-                      setTeacherImportError('');
-                      teacherImportDialog.current?.showModal();
-                    }}
-                    className="min-h-[40px] px-3.5 py-2 rounded-xl border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-900 text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
-                  >
-                    <Upload className="w-4 h-4" aria-hidden="true" />
-                    <span>上傳 CSV / TXT 匯入全校教師</span>
+                  <button type="button" onClick={downloadTeacherTemplateCSV} className={teacherAction}>
+                    <Download size={16} aria-hidden="true" />下載匯入範本
                   </button>
-
-                  <button
-                    type="button"
-                    onClick={downloadTeacherTemplateCSV}
-                    className="min-h-[40px] px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors"
-                  >
-                    <Download className="w-3.5 h-3.5 text-slate-600" />
-                    <span>下載匯入範本</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={exportCurrentTeachersCSV}
-                    className="min-h-[40px] px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors"
-                  >
-                    <Download className="w-3.5 h-3.5 text-teal-800" />
-                    <span>匯出教師名冊</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('assign')}
-                    className="min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                  >
-                    <UserCheck className="w-4 h-4" />
-                    <span>前往監考指派 →</span>
+                  <button type="button" onClick={exportCurrentTeachersCSV} className={teacherAction}>
+                    <Download size={16} aria-hidden="true" />匯出教師名冊
                   </button>
                 </div>
-              </div>
-
-              {teacherPending && <p role="status" className="rounded-xl bg-teal-50 p-3 text-sm font-bold text-teal-900">{teacherPending}</p>}
-              {teacherFeedback && (
-                <div
-                  role={teacherFeedback.type === 'ok' ? 'status' : 'alert'}
-                  className={`p-3 rounded-xl border text-xs sm:text-sm font-black flex items-center justify-between ${
-                    teacherFeedback.type === 'ok'
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : 'bg-rose-50 border-rose-200 text-rose-800'
-                  }`}
-                >
-                  <span>{teacherFeedback.msg}</span>
-                </div>
-              )}
-
-              <dialog ref={teacherImportDialog} aria-labelledby="teacher-import-title"
-                onCancel={(event) => { if (teacherPending) event.preventDefault(); }}
-                onClose={() => { setTeacherImportFile(undefined); setTeacherImportRows(undefined); setTeacherImportError(''); }}
-                className="no-print fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/65"
-              >
-                <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
-                  <header className="shrink-0 border-b border-slate-200 p-4 sm:px-6">
-                    <h3 id="teacher-import-title" className="text-lg font-black">匯入全校教師獨立帳號</h3>
-                    <p className="mt-1 text-sm leading-6 text-slate-700">
-                      上傳 UTF-8 編碼的 CSV 或 TXT。每列一位教師，欄位依序為：教師姓名、獨立登入帳號、獨立登入密碼、任教科別、指派班級代號（選填）。每次最多 50 筆。
-                    </p>
-                  </header>
-                  <div className="min-h-0 space-y-3 overflow-y-auto p-4 sm:px-6">
-                    <label className="block text-sm font-bold">匯入方式
-                      <select value={batchImportMode} disabled={Boolean(teacherPending)} onChange={(event) => setBatchImportMode(event.target.value as 'merge' | 'replace')}
-                        className="mt-1 block w-full rounded-lg border border-slate-300 p-2 text-sm font-bold">
-                        <option value="merge">合併新增／更新</option>
-                        <option value="replace">覆蓋名冊（未列入者將移除）</option>
-                      </select>
-                    </label>
-                    <label className="block text-sm font-bold">選擇 UTF-8 CSV 或 TXT 檔案
-                      <input type="file" accept=".csv,.txt,text/csv,text/plain" disabled={Boolean(teacherPending)}
-                        className="mt-1 block w-full rounded-lg border border-slate-300 p-2 text-sm"
-                        onChange={(event) => {
-                          const selected = event.target.files?.[0];
-                          event.target.value = '';
-                          if (selected) void selectTeacherImportFile(selected);
-                        }} />
-                    </label>
-                    <p className="text-xs text-slate-600">請使用範本的欄位名稱與順序。預覽不會顯示密碼。</p>
-                    {teacherImportFile && <p className="text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">{teacherImportFile.name}</p>}
-                    {teacherPending && <p role="status" className="text-sm text-slate-700">{teacherPending}</p>}
-                    {teacherImportError && <p role="alert" className="rounded-lg bg-rose-50 p-2.5 text-sm font-bold text-rose-900">{teacherImportError}</p>}
-                    {teacherImportError && teacherImportFile && !teacherPending && (
-                      <button type="button" onClick={() => {
-                        try {
-                          setTeacherImportError('');
-                          setTeacherImportRows(previewTeacherImport(teacherImportFile.text));
-                        } catch (error) {
-                          setTeacherImportError(error instanceof Error ? error.message : '名單格式錯誤');
-                        }
-                      }} className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 hover:bg-slate-50">重新預覽</button>
-                    )}
-                    {teacherImportRows && <>
-                      <p role="status" className="text-sm font-bold text-teal-900">
-                        預覽 {teacherImportRows.length} 筆 · 將{batchImportMode === 'replace' ? '覆蓋匯入' : '新增或更新'} {teacherImportRows.length} 筆
-                        {batchImportMode === 'replace' ? ` · 將移除未列入的 ${teachersList.filter((teacher) => !teacherImportRows.some((row) => row.username === teacher.username)).length} 位教師` : ''}
-                      </p>
-                      {batchImportMode === 'replace' && (
-                        <p className="rounded-lg bg-rose-50 p-2.5 text-sm font-bold text-rose-900">
-                          現有教師名冊將以這次匯入的資料取代。相同帳號會保留識別碼與出題／分節監考指派，但密碼都會更新。仍有監考指派的教師若未列入會被阻擋。
-                        </p>
-                      )}
-                      <ul aria-label="教師名冊匯入預覽" className="divide-y divide-slate-200 rounded-xl border border-slate-200">
-                        {teacherImportRows.map((row, index) => (
-                          <li key={`${row.username}-${index}`} className="flex items-start gap-2 p-2.5 text-sm">
-                            <span className="shrink-0 text-xs font-bold text-teal-900">第 {index + 1} 列 · {teachersList.some((teacher) => teacher.username === row.username) ? '更新' : '新增'}</span>
-                            <span className="min-w-0 [overflow-wrap:anywhere]">{row.name}／{row.username}／{row.department}／{row.assignedClassId || '沿用原預設考場或不指派'}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </>}
+              </section>
+              <section aria-labelledby="teacher-account-title" className="flex min-w-0 flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <div className="flex items-start gap-3">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-sky-100 text-sky-900"><UserPlus size={19} aria-hidden="true" /></span>
+                  <div>
+                    <h3 id="teacher-account-title" className="font-black text-slate-950">個別帳號管理</h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-700">新增教師登入帳號，或從下方名冊編輯資料、重設密碼與設定出題指派。</p>
                   </div>
-                  <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 p-4 sm:px-6">
-                    <button type="button" disabled={Boolean(teacherPending)} onClick={() => teacherImportDialog.current?.close()}
-                      className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50">關閉</button>
-                    <button type="button" disabled={Boolean(teacherPending) || !teacherImportRows?.length}
-                      className={`min-h-11 rounded-xl px-4 text-sm font-bold text-white disabled:opacity-50 ${batchImportMode === 'replace' ? 'bg-rose-700 hover:bg-rose-800' : 'bg-teal-800 hover:bg-teal-900'}`}
-                      onClick={() => void confirmTeacherFileImport()}>確認匯入</button>
-                  </footer>
                 </div>
-              </dialog>
-
-              <dialog ref={teacherDialog} aria-labelledby="teacher-form-title"
-                onClose={() => setTchPassForm('')}
-                onCancel={(event) => { if (savingTeacher) event.preventDefault(); }}
-                className="no-print fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/65"
-              >
-                <form onSubmit={handleSaveSingleTeacher} className="flex max-h-[calc(100dvh-2rem-2px)] flex-col">
-                  <header className="shrink-0 border-b border-slate-200 px-4 py-4 sm:px-6">
-                    <h3 id="teacher-form-title" className="flex items-center gap-2 text-lg font-black">
-                      <UserPlus size={20} className="shrink-0 text-teal-800" aria-hidden="true" />
-                      {editingTeacherId ? '編輯教師帳號與出題指派' : '新增教師帳號與出題指派'}
-                    </h3>
-                    <p className="mt-1 text-sm text-slate-700">管理教師登入資料，並從已儲存的考程表選擇出題科目。</p>
-                  </header>
-                  <div className="min-h-0 flex-auto overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
-                    <fieldset disabled={savingTeacher} className="min-w-0 space-y-4">
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
-                          <label htmlFor="admin-tch-name-form" className="block text-[11px] font-black text-slate-600 mb-1">
-                            教師姓名 *
-                          </label>
-                          <input id="admin-tch-name-form"
-                            type="text" required
-                            value={tchNameForm}
-                            onChange={(e) => setTchNameForm(e.target.value)}
-                            placeholder="請輸入教師姓名"
-                            className="w-full text-xs sm:text-sm font-black p-2 rounded-xl border border-slate-300 bg-white"
-                          />
-                        </div>
-
-                        <div>
-                          <label htmlFor="admin-tch-dept-form" className="block text-[11px] font-black text-slate-600 mb-1">
-                            任教科別
-                          </label>
-                          <input id="admin-tch-dept-form"
-                            type="text"
-                            value={tchDeptForm}
-                            onChange={(e) => setTchDeptForm(e.target.value)}
-                            placeholder="例如：數學科"
-                            className="w-full text-xs sm:text-sm font-black p-2 rounded-xl border border-slate-300 bg-white"
-                          />
-                        </div>
-
-                        <div>
-                          <label htmlFor="admin-tch-user-form" className="block text-[11px] font-black text-slate-600 mb-1">
-                            獨立登入帳號 *
-                          </label>
-                          <input id="admin-tch-user-form"
-                            type="text" required
-                            value={tchUserForm}
-                            onChange={(e) => setTchUserForm(e.target.value)}
-                            placeholder="請輸入登入帳號"
-                            className="w-full text-xs sm:text-sm font-mono font-black p-2 rounded-xl border border-slate-300 bg-white"
-                          />
-                        </div>
-
-                        <div>
-                          <label htmlFor="admin-tch-pass-form" className="block text-[11px] font-black text-slate-600 mb-1">
-                            {editingTeacherId ? '重設登入密碼' : '獨立登入密碼 *'}
-                          </label>
-                          <input id="admin-tch-pass-form"
-                            type="password"
-                            required={!editingTeacherId}
-                            autoComplete="new-password"
-                            minLength={MIN_TEACHER_PASSWORD_LENGTH}
-                            maxLength={256}
-                            value={tchPassForm}
-                            onChange={(e) => setTchPassForm(e.target.value)}
-                            placeholder={editingTeacherId ? '留空沿用；重設至少 12 字元' : '至少 12 字元，建議使用長密語'}
-                            className="w-full text-xs sm:text-sm font-mono font-black p-2 rounded-xl border border-slate-300 bg-white"
-                          />
-                        </div>
-
-                      </div>
-                      <fieldset className="min-w-0 space-y-3 rounded-xl border border-teal-200 bg-teal-50 p-3">
-                        <legend className="px-1 text-sm font-black text-teal-950">出題科目與年級</legend>
-                        <p className="text-xs leading-5 text-teal-900">教師可為指派的科目與年級提交試題更正，教務核准後才會發布。</p>
-                        {tchAuthorAssignments.map((assignment, index) => (
-                          <div key={index} className="grid items-end gap-2 rounded-lg border border-teal-100 bg-white p-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                            <label className="min-w-0 text-xs font-bold text-slate-700">第 {index + 1} 項出題科目
-                              <select required value={assignment.subject}
-                                onChange={(event) => updateAuthorAssignment(index, { subject: event.target.value })}
-                                className="mt-1 block min-h-10 w-full rounded-lg border border-slate-300 px-2.5 text-sm text-slate-950">
-                                <option value="">選擇考程表科目</option>
-                                {assignment.subject && !examSubjects.includes(assignment.subject) && (
-                                  <option value={assignment.subject}>{assignment.subject}（目前考程未列）</option>
-                                )}
-                                {examSubjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
-                              </select>
-                            </label>
-                            <label className="min-w-0 text-xs font-bold text-slate-700">第 {index + 1} 項年級
-                              <select required value={grades.includes(assignment.grade) ? assignment.grade : ''}
-                                onChange={(event) => {
-                                  const grade = Number(event.target.value);
-                                  const retainSubject = examSubjects.includes(assignment.subject) ||
-                                    originalAuthorAssignments.current.some((item) => item.subject === assignment.subject && item.grade === grade);
-                                  updateAuthorAssignment(index, { grade, subject: retainSubject ? assignment.subject : '' });
-                                }}
-                                className="mt-1 block min-h-10 w-full rounded-lg border border-slate-300 px-2.5 text-sm text-slate-950">
-                                <option value="">選擇年級</option>
-                                {grades.map((grade) => <option key={grade} value={grade}>{gradeLabel(sourceData.config, grade)}</option>)}
-                              </select>
-                            </label>
-                            <button type="button" aria-label={`移除第 ${index + 1} 項出題指派`}
-                              onClick={() => setTchAuthorAssignments((current) => current.filter((_, row) => row !== index))}
-                              className="min-h-10 rounded-lg px-3 text-xs font-bold text-rose-800 hover:bg-rose-50">移除</button>
-                          </div>
-                        ))}
-                        {tchAuthorAssignments.length === 0 && <p className="text-xs text-slate-700">尚未指派出題科目與年級。</p>}
-                        {!examSubjects.length && <p className="text-xs font-bold text-teal-900">考程表尚無科目。請先到「考務設定 → 考程表」新增並儲存考試節次。</p>}
-                        <button type="button" disabled={!examSubjects.length || !grades.length || tchAuthorAssignments.length >= MAX_EXAM_AUTHOR_ASSIGNMENTS}
-                          onClick={() => setTchAuthorAssignments((current) => [...current, { subject: '', grade: 0 }])}
-                          className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-3 text-xs font-bold text-teal-900 hover:bg-teal-100 disabled:opacity-50">
-                          <Plus size={15} aria-hidden="true" />新增出題指派
-                        </button>
-                      </fieldset>
-                    </fieldset>
-                  </div>
-                  <footer className="shrink-0 space-y-2 border-t border-slate-200 px-4 py-3 sm:px-6">
-                    {teacherFormError && <p role="alert" className="text-sm font-bold text-rose-800">{teacherFormError}</p>}
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <button type="button" disabled={savingTeacher} onClick={() => teacherDialog.current?.close()}
-                        className="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50">取消</button>
-                      <button type="submit" disabled={savingTeacher} className="min-h-11 rounded-xl bg-teal-800 px-4 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50">
-                        {savingTeacher ? '儲存中…' : editingTeacherId ? '儲存教師帳號設定' : '新增教師帳號'}
-                      </button>
-                    </div>
-                  </footer>
-                </form>
-              </dialog>
-
-              {/* 全校教師清冊搜尋與篩選列 */}
-              <div className="flex flex-wrap items-center justify-between gap-2.5">
-                <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => setTeacherAssignFilter('all')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-black cursor-pointer ${
-                      teacherAssignFilter === 'all'
-                        ? 'bg-white text-teal-800 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    全校教師 ({teachersList.length})
+                <div className="mt-auto flex flex-wrap gap-2">
+                  <button type="button" onClick={() => openTeacherForm()} className={teacherPrimary}>
+                    <UserPlus size={17} aria-hidden="true" />新增教師帳號
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setTeacherAssignFilter('assigned')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-black cursor-pointer ${
-                      teacherAssignFilter === 'assigned'
-                        ? 'bg-white text-emerald-700 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    已排班教師 ({teachersList.filter(hasAssignment).length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTeacherAssignFilter('unassigned')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-black cursor-pointer ${
-                      teacherAssignFilter === 'unassigned'
-                        ? 'bg-white text-amber-700 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    待命教師 ({teachersList.filter((t) => !hasAssignment(t)).length})
+                  <button type="button" onClick={() => setActiveTab('assign')} className={teacherAction}>
+                    <UserCheck size={17} aria-hidden="true" />前往監考指派
                   </button>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={teacherSearch}
-                      onChange={(e) => setTeacherSearch(e.target.value)}
-                      aria-label="搜尋教師姓名、帳號或科別"
-                      placeholder="搜尋教師姓名、帳號或科別..."
-                      className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-300 text-xs font-bold bg-white focus:outline-none focus:border-teal-700"
-                    />
-                  </div>
-
-                </div>
-              </div>
-
-              <p className="text-sm font-bold">符合條件 {visibleTeachers.length} / {teachersList.length} 位教師</p>
-              {/* 全校教師獨立帳號清冊表格 (純名冊與帳密管理) */}
-              <div className="border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="overflow-x-auto max-h-[460px] overflow-y-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-slate-100 border-b border-slate-200 sticky top-0 z-10 text-[11px] sm:text-xs font-black text-slate-600">
-                      <tr>
-                        <th className="py-2.5 px-4">教師姓名</th>
-                        <th className="py-2.5 px-4">任教科別</th>
-                        <th className="py-2.5 px-4">獨立登入帳號</th>
-                        <th className="py-2.5 px-4">目前排班狀態</th>
-                        <th className="py-2.5 px-4 text-right">帳密操作</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200/80 text-xs sm:text-sm bg-white">
-                      {!visibleTeachers.length && <tr><td colSpan={5} className="p-6 text-center">
-                        {teachersList.length ? '沒有符合條件的教師。' : '尚未建立教師名冊，請新增帳號或匯入名單。'}
-                        <button type="button" onClick={() => { setTeacherSearch(''); setTeacherAssignFilter('all'); }} className="ml-2 underline">清除篩選</button>
-                      </td></tr>}
-                      {visibleTeachers
-                        .map((t) => {
-                          const assignedClass = data.classrooms.find(
-                            (c) => c.classId === t.assignedClassId
-                          );
-                          return (
-                            <tr key={t.id} className="hover:bg-slate-50/90 transition-colors">
-                              <td className="py-2.5 px-4 font-black text-slate-900">
-                                {t.name}
-                                {!!t.examAuthorAssignments?.length && (
-                                  <ul aria-label="出題科目與年級" className="mt-1 flex flex-wrap gap-1">
-                                    {t.examAuthorAssignments.map((item) => (
-                                      <li key={JSON.stringify(item)} className="rounded-full bg-teal-100 px-2 py-0.5 text-xs text-teal-950 [overflow-wrap:anywhere]">{authorAssignmentLabel(item)}</li>
-                                    ))}
-                                  </ul>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-4 font-bold text-slate-600">
-                                {t.department || '專任教師'}
-                              </td>
-                              <td className="py-2.5 px-4">
-                                <span className="px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200 font-mono font-black text-slate-800">
-                                  {t.username}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-4">
-                                {assignedClass ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-black">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                    <span>
-                                      預設考場：{assignedClass.classId} {assignedClass.className}
-                                    </span>
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold">
-                                    {hasAssignment(t) ? '已有分節監考' : '未排班（待命）'}
-                                  </span>
-                                )}
-                                <details className="mt-2"><summary>有效監考節次：{teacherSlots(t).length}</summary><ul>{teacherSlots(t).map((slot) => <li key={slot}>{slot}</li>)}</ul></details>
-                              </td>
-                              <td className="py-2.5 px-4 text-right whitespace-nowrap">
-                                <div className="inline-flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => openTeacherForm(t)}
-                                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-800 font-black text-xs cursor-pointer transition-colors"
-                                  >
-                                    編輯教師
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={Boolean(teacherPending)}
-                                    onClick={() => handleDeleteTeacherAccount(t)}
-                                    className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-700 text-rose-700 hover:text-white cursor-pointer transition-colors"
-                                    title="刪除此教師帳號"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              </section>
             </div>
+
+            {teacherPending && <p role="status" className="rounded-xl bg-teal-50 p-3 text-sm font-bold text-teal-900">{teacherPending}</p>}
+            {teacherFeedback && (
+              <div
+                role={teacherFeedback.type === 'ok' ? 'status' : 'alert'}
+                className={`p-3 rounded-xl border text-xs sm:text-sm font-black flex items-center justify-between ${
+                  teacherFeedback.type === 'ok'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}
+              >
+                <span>{teacherFeedback.msg}</span>
+              </div>
+            )}
+
+            <dialog ref={teacherImportDialog} aria-labelledby="teacher-import-title"
+              onCancel={(event) => { if (teacherPending) event.preventDefault(); }}
+              onClose={() => {
+                if (teacherImportDialog.current?.open) return;
+                teacherImportSelection.current++;
+                setTeacherImportFile(undefined);
+                setTeacherImportRows(undefined);
+                setTeacherImportError('');
+              }}
+              className="no-print fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/65"
+            >
+              <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
+                <header className="shrink-0 border-b border-teal-100 bg-teal-50 p-4 sm:px-6">
+                  <h3 id="teacher-import-title" className="flex items-center gap-2 text-lg font-black"><Upload size={20} className="text-teal-800" aria-hidden="true" />匯入教師名冊</h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-700">
+                    每次最多 50 筆。使用匯入範本準備檔案，先預覽名單，再確認匯入。
+                  </p>
+                </header>
+                <div className="min-h-0 space-y-4 overflow-y-auto p-4 sm:px-6">
+                  <label className="block text-sm font-bold">1　選擇匯入方式
+                    <select value={batchImportMode} disabled={Boolean(teacherPending)} onChange={(event) => setBatchImportMode(event.target.value as 'merge' | 'replace')}
+                      className={teacherInput + ' mt-1.5'}>
+                      <option value="merge">合併新增／更新</option>
+                      <option value="replace">覆蓋名冊（未列入者將移除）</option>
+                    </select>
+                  </label>
+                  <label className="block cursor-pointer rounded-xl border border-dashed border-teal-300 bg-teal-50 p-3 text-sm font-bold focus-within:ring-2 focus-within:ring-teal-700">
+                    2　上傳 UTF-8 CSV 或 TXT
+                    <input type="file" accept=".csv,.txt,text/csv,text/plain" disabled={Boolean(teacherPending)}
+                      aria-label="選擇 UTF-8 CSV 或 TXT 檔案" className="peer sr-only"
+                      onChange={(event) => {
+                        const selected = event.target.files?.[0];
+                        event.target.value = '';
+                        if (selected) void selectTeacherImportFile(selected);
+                      }} />
+                    <span className="mt-2 flex min-h-11 flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1.5 peer-disabled:opacity-50">
+                      <span className="rounded-md bg-teal-100 px-2 py-1.5 text-teal-950">{teacherImportFile ? '更換檔案' : '選擇檔案'}</span>
+                      <span className="min-w-0 px-1 font-normal text-slate-700 [overflow-wrap:anywhere]">{teacherImportFile?.name ?? '尚未選擇檔案'}</span>
+                    </span>
+                  </label>
+                  <p className="text-xs leading-5 text-slate-600">欄位順序為教師姓名、登入帳號、登入密碼、科別、班級代號（選填）。預覽會隱藏密碼。</p>
+                  {teacherPending && <p role="status" className="text-sm text-slate-700">{teacherPending}</p>}
+                  {teacherImportError && <p role="alert" className="rounded-lg bg-rose-50 p-2.5 text-sm font-bold text-rose-900">{teacherImportError}</p>}
+                  {teacherImportError && teacherImportFile && !teacherPending && (
+                    <button type="button" onClick={() => {
+                      try {
+                        setTeacherImportError('');
+                        setTeacherImportRows(previewTeacherImport(teacherImportFile.text));
+                      } catch (error) {
+                        setTeacherImportError(error instanceof Error ? error.message : '名單格式錯誤');
+                      }
+                    }} className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 hover:bg-slate-50">重新預覽</button>
+                  )}
+                  {teacherImportRows && <>
+                    <p role="status" className="text-sm font-bold text-teal-900">
+                      3　核對預覽 · {teacherImportRows.length} 筆將{batchImportMode === 'replace' ? '覆蓋匯入' : '新增或更新'}
+                      {batchImportMode === 'replace' ? ` · 將移除未列入的 ${teachersList.filter((teacher) => !teacherImportRows.some((row) => row.username === teacher.username)).length} 位教師` : ''}
+                    </p>
+                    {batchImportMode === 'replace' && (
+                      <p className="rounded-lg bg-rose-50 p-2.5 text-sm font-bold text-rose-900">
+                        現有教師名冊將以這次匯入的資料取代。相同帳號會保留識別碼與出題／分節監考指派，但密碼都會更新。仍有監考指派的教師若未列入會被阻擋。
+                      </p>
+                    )}
+                    <ul aria-label="教師名冊匯入預覽" className="divide-y divide-slate-200 rounded-xl border border-slate-200">
+                      {teacherImportRows.map((row, index) => (
+                        <li key={`${row.username}-${index}`} className="flex min-w-0 flex-wrap items-start justify-between gap-2 p-3 text-sm">
+                          <div className="min-w-0 [overflow-wrap:anywhere]">
+                            <p className="font-black text-slate-950">{row.name} · {row.username}</p>
+                            <p className="mt-0.5 text-xs text-slate-700">{row.department} · {row.assignedClassId || '沿用原預設考場或不指派'}</p>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-teal-50 px-2 py-1 text-xs font-bold text-teal-900">{teachersList.some((teacher) => teacher.username === row.username) ? '更新' : '新增'}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>}
+                </div>
+                <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 p-4 sm:px-6">
+                  <button type="button" disabled={Boolean(teacherPending)} onClick={() => teacherImportDialog.current?.close()}
+                    className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50">關閉</button>
+                  <button type="button" disabled={Boolean(teacherPending) || !teacherImportRows?.length}
+                    className={`min-h-11 rounded-xl px-4 text-sm font-bold text-white disabled:opacity-50 ${batchImportMode === 'replace' ? 'bg-rose-700 hover:bg-rose-800' : 'bg-teal-800 hover:bg-teal-900'}`}
+                    onClick={() => void confirmTeacherFileImport()}>確認匯入</button>
+                </footer>
+              </div>
+            </dialog>
+
+            <dialog ref={teacherDialog} aria-labelledby="teacher-form-title"
+              onClose={() => setTchPassForm('')}
+              onCancel={(event) => { if (savingTeacher) event.preventDefault(); }}
+              className="no-print fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/65"
+            >
+              <form onSubmit={handleSaveSingleTeacher} className="flex max-h-[calc(100dvh-2rem-2px)] flex-col">
+                <header className="shrink-0 border-b border-teal-100 bg-teal-50 px-4 py-4 sm:px-6">
+                  <h3 id="teacher-form-title" className="flex items-center gap-2 text-lg font-black">
+                    <UserPlus size={20} className="shrink-0 text-teal-800" aria-hidden="true" />
+                    {editingTeacherId ? '編輯教師帳號與出題指派' : '新增教師帳號與出題指派'}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-700">管理教師登入資料，並從已儲存的考程表選擇出題科目。</p>
+                </header>
+                <div className="min-h-0 flex-auto overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+                  <fieldset disabled={savingTeacher} className="min-w-0 space-y-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <h4 className="text-sm font-black text-teal-900 sm:col-span-2">登入帳號與基本資料</h4>
+                      <div>
+                        <label htmlFor="admin-tch-name-form" className="mb-1 block text-sm font-bold text-slate-800">
+                          教師姓名 *
+                        </label>
+                        <input id="admin-tch-name-form"
+                          type="text" required
+                          value={tchNameForm}
+                          onChange={(e) => setTchNameForm(e.target.value)}
+                          placeholder="請輸入教師姓名"
+                          className={teacherInput}
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="admin-tch-dept-form" className="mb-1 block text-sm font-bold text-slate-800">
+                          任教科別
+                        </label>
+                        <input id="admin-tch-dept-form"
+                          type="text"
+                          value={tchDeptForm}
+                          onChange={(e) => setTchDeptForm(e.target.value)}
+                          placeholder="例如：數學科"
+                          className={teacherInput}
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="admin-tch-user-form" className="mb-1 block text-sm font-bold text-slate-800">
+                          獨立登入帳號 *
+                        </label>
+                        <input id="admin-tch-user-form"
+                          type="text" required
+                          value={tchUserForm}
+                          onChange={(e) => setTchUserForm(e.target.value)}
+                          placeholder="請輸入登入帳號"
+                          className={teacherInput + ' font-mono'}
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="admin-tch-pass-form" className="mb-1 block text-sm font-bold text-slate-800">
+                          {editingTeacherId ? '重設登入密碼' : '獨立登入密碼 *'}
+                        </label>
+                        <input id="admin-tch-pass-form"
+                          type="password"
+                          required={!editingTeacherId}
+                          autoComplete="new-password"
+                          minLength={MIN_TEACHER_PASSWORD_LENGTH}
+                          maxLength={256}
+                          value={tchPassForm}
+                          onChange={(e) => setTchPassForm(e.target.value)}
+                          placeholder={editingTeacherId ? '留空沿用；重設至少 12 字元' : '至少 12 字元，建議使用長密語'}
+                          className={teacherInput}
+                        />
+                      </div>
+
+                    </div>
+                    <fieldset className="min-w-0 space-y-3 rounded-xl border border-teal-200 bg-teal-50 p-3">
+                      <legend className="px-1 text-sm font-black text-teal-950">出題科目與年級</legend>
+                      <p className="text-xs leading-5 text-teal-900">教師可為指派的科目與年級提交試題更正，教務核准後才會發布。</p>
+                      {tchAuthorAssignments.map((assignment, index) => (
+                        <div key={index} className="grid items-end gap-2 rounded-lg border border-teal-100 bg-white p-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                          <label className="min-w-0 text-xs font-bold text-slate-700">第 {index + 1} 項出題科目
+                            <select required value={assignment.subject}
+                              onChange={(event) => updateAuthorAssignment(index, { subject: event.target.value })}
+                              className="mt-1 block min-h-10 w-full rounded-lg border border-slate-300 px-2.5 text-sm text-slate-950">
+                              <option value="">選擇考程表科目</option>
+                              {assignment.subject && !examSubjects.includes(assignment.subject) && (
+                                <option value={assignment.subject}>{assignment.subject}（目前考程未列）</option>
+                              )}
+                              {examSubjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
+                            </select>
+                          </label>
+                          <label className="min-w-0 text-xs font-bold text-slate-700">第 {index + 1} 項年級
+                            <select required value={grades.includes(assignment.grade) ? assignment.grade : ''}
+                              onChange={(event) => {
+                                const grade = Number(event.target.value);
+                                const retainSubject = examSubjects.includes(assignment.subject) ||
+                                  originalAuthorAssignments.current.some((item) => item.subject === assignment.subject && item.grade === grade);
+                                updateAuthorAssignment(index, { grade, subject: retainSubject ? assignment.subject : '' });
+                              }}
+                              className="mt-1 block min-h-10 w-full rounded-lg border border-slate-300 px-2.5 text-sm text-slate-950">
+                              <option value="">選擇年級</option>
+                              {grades.map((grade) => <option key={grade} value={grade}>{gradeLabel(sourceData.config, grade)}</option>)}
+                            </select>
+                          </label>
+                          <button type="button" aria-label={`移除第 ${index + 1} 項出題指派`}
+                            onClick={() => setTchAuthorAssignments((current) => current.filter((_, row) => row !== index))}
+                            className="min-h-10 rounded-lg px-3 text-xs font-bold text-rose-800 hover:bg-rose-50">移除</button>
+                        </div>
+                      ))}
+                      {tchAuthorAssignments.length === 0 && <p className="text-xs text-slate-700">尚未指派出題科目與年級。</p>}
+                      {!examSubjects.length && <p className="text-xs font-bold text-teal-900">考程表尚無科目。請先到「考務設定 → 考程表」新增並儲存考試節次。</p>}
+                      <button type="button" disabled={!examSubjects.length || !grades.length || tchAuthorAssignments.length >= MAX_EXAM_AUTHOR_ASSIGNMENTS}
+                        onClick={() => setTchAuthorAssignments((current) => [...current, { subject: '', grade: 0 }])}
+                        className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-3 text-xs font-bold text-teal-900 hover:bg-teal-100 disabled:opacity-50">
+                        <Plus size={15} aria-hidden="true" />新增出題指派
+                      </button>
+                    </fieldset>
+                  </fieldset>
+                </div>
+                <footer className="shrink-0 space-y-2 border-t border-slate-200 px-4 py-3 sm:px-6">
+                  {teacherFormError && <p role="alert" className="text-sm font-bold text-rose-800">{teacherFormError}</p>}
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button type="button" disabled={savingTeacher} onClick={() => teacherDialog.current?.close()}
+                      className="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50">取消</button>
+                    <button type="submit" disabled={savingTeacher} className="min-h-11 rounded-xl bg-teal-800 px-4 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50">
+                      {savingTeacher ? '儲存中…' : editingTeacherId ? '儲存教師帳號設定' : '新增教師帳號'}
+                    </button>
+                  </div>
+                </footer>
+              </form>
+            </dialog>
+
+            <section aria-labelledby="teacher-roster-title" className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h3 id="teacher-roster-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
+                    <Users size={20} className="text-teal-800" aria-hidden="true" />教師帳號清冊
+                  </h3>
+                  <p role="status" className="mt-1 text-sm text-slate-600">顯示 {visibleTeachers.length} / {teachersList.length} 位教師</p>
+                </div>
+                <label className="block min-w-0 text-sm font-bold text-slate-800 max-sm:w-full">
+                  搜尋教師
+                  <span className="relative mt-1.5 block">
+                    <Search size={17} aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-500" />
+                    <input type="search" value={teacherSearch} onChange={(event) => setTeacherSearch(event.target.value)}
+                      aria-label="搜尋教師姓名、帳號或科別" placeholder="輸入姓名、帳號或科別"
+                      className="block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white pr-3 pl-9 text-base font-normal text-slate-950 sm:min-w-64 sm:text-sm" />
+                  </span>
+                </label>
+              </div>
+              <div role="group" aria-label="排班狀態篩選" className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+                {teacherFilters.map(({ id, label, count }) => (
+                  <button key={id} type="button" aria-pressed={teacherAssignFilter === id} onClick={() => setTeacherAssignFilter(id)}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-teal-400 hover:bg-teal-50 aria-pressed:border-teal-700 aria-pressed:bg-teal-100 aria-pressed:text-teal-950">
+                    {label}<span className="rounded-full bg-white px-2 py-0.5 text-xs font-black text-slate-700">{count}</span>
+                  </button>
+                ))}
+                {(teacherSearch || teacherAssignFilter !== 'all') && (
+                  <button type="button" onClick={() => { setTeacherSearch(''); setTeacherAssignFilter('all'); }}
+                    className="min-h-11 rounded-xl px-3 text-sm font-bold text-teal-800 hover:bg-teal-50">清除篩選</button>
+                )}
+              </div>
+              {visibleTeachers.length ? (
+                <div className="mt-4">
+                  <div aria-hidden="true" className={'hidden gap-3 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-600 xl:grid ' + teacherRowColumns}>
+                    <span>教師姓名／出題指派</span><span>任教科別</span><span>登入帳號</span><span>監考安排</span><span>帳號操作</span>
+                  </div>
+                  <ul className="mt-2 space-y-2">
+                    {visibleTeachers.map((teacher) => {
+                      const room = sourceData.classrooms.find((item) => item.classId === teacher.assignedClassId);
+                      const slots = teacherSlots.get(teacher.id) ?? [];
+                      return (
+                        <li key={teacher.id} className={'grid min-w-0 gap-3 rounded-xl border border-slate-200 bg-white p-3 hover:border-teal-200 sm:grid-cols-2 xl:items-start xl:px-4 ' + teacherRowColumns}>
+                          <div className="min-w-0 sm:col-span-2 xl:col-span-1">
+                            <h4 className="text-base font-black text-slate-950 [overflow-wrap:anywhere]">{teacher.name}</h4>
+                            {!!teacher.examAuthorAssignments?.length && (
+                              <ul aria-label="出題科目與年級" className="mt-1.5 flex flex-wrap gap-1">
+                                {teacher.examAuthorAssignments.map((item) => (
+                                  <li key={JSON.stringify(item)} className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-bold text-teal-950 [overflow-wrap:anywhere]">{authorAssignmentLabel(item)}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                          <dl className="min-w-0">
+                            <dt className="text-xs font-bold text-slate-600 xl:sr-only">任教科別</dt>
+                            <dd className="mt-1 text-sm text-slate-800 [overflow-wrap:anywhere]">{teacher.department || '專任教師'}</dd>
+                          </dl>
+                          <dl className="min-w-0">
+                            <dt className="text-xs font-bold text-slate-600 xl:sr-only">登入帳號</dt>
+                            <dd className="mt-1 inline-block max-w-full rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs font-bold text-slate-800 [overflow-wrap:anywhere]">{teacher.username}</dd>
+                          </dl>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-600 xl:sr-only">監考安排</p>
+                            <span className={'mt-1 inline-block rounded-full px-2 py-1 text-xs font-bold ' + (slots.length ? 'bg-emerald-100 text-emerald-950' : 'bg-slate-100 text-slate-700')}>
+                              {slots.length ? '已排班' : '未排班'}
+                            </span>
+                            {room && <p className="mt-1 text-xs font-bold text-slate-700 [overflow-wrap:anywhere]">預設考場 · {room.classId} {room.className}</p>}
+                            {slots.length > 0 && (
+                              <details className="mt-1">
+                                <summary className="min-h-8 cursor-pointer rounded-lg py-1 text-xs font-bold text-teal-800 hover:underline">查看 {slots.length} 節監考</summary>
+                                <ul className="space-y-1 rounded-lg bg-slate-50 p-2 text-xs leading-5 text-slate-700">
+                                  {slots.map((slot, index) => <li key={index} className="[overflow-wrap:anywhere]">{slot}</li>)}
+                                </ul>
+                              </details>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-2 sm:border-0 sm:pt-0">
+                            <button type="button" onClick={() => openTeacherForm(teacher)}
+                              aria-label={'編輯教師帳號，' + teacher.name} className={teacherAction}>
+                              <FileEdit size={15} aria-hidden="true" />編輯
+                            </button>
+                            <button type="button" disabled={Boolean(teacherPending)} onClick={() => void handleDeleteTeacherAccount(teacher)}
+                              aria-label={'移除教師帳號，' + teacher.name}
+                              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl px-2.5 text-sm font-bold text-rose-800 hover:bg-rose-50 disabled:opacity-50">
+                              <Trash2 size={15} aria-hidden="true" />移除
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : (
+                <p className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-700">
+                  {teachersList.length ? '沒有符合條件的教師。' : '尚未建立教師名冊，請新增帳號或匯入名單。'}
+                </p>
+              )}
+            </section>
           </div>
         )}
 
