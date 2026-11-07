@@ -505,7 +505,7 @@ export default function App() {
     }
   };
 
-  const isZeroScrollBoard = boardView === 'blackboard' && !!boardClassroom;
+  const viewingClassroomBoard = boardView === 'blackboard' && !!boardClassroom;
   const needsSession = activeView === 'academic' || activeView === 'admin' || activeView === 'invigilator' || activeView === 'login';
   const signedInOnLoginPage = activeView === 'login' && session !== null;
   const connectionMessage = {
@@ -525,9 +525,7 @@ export default function App() {
 
   return (
     <div
-      className={`min-h-screen bg-[#f4f6fb] text-slate-900 flex flex-col font-sans selection:bg-blue-700 selection:text-white ${
-        isZeroScrollBoard ? 'lg:h-screen lg:overflow-hidden' : ''
-      }`}
+      className="min-h-screen bg-[#f4f6fb] text-slate-900 flex flex-col font-sans selection:bg-blue-700 selection:text-white"
     >
       <SecurityReauth />
       <a href="#main-content" className="skip-to-main no-print" onClick={(event) => {
@@ -558,11 +556,7 @@ export default function App() {
         id="main-content"
         ref={mainRef}
         tabIndex={-1}
-        className={`flex-1 max-w-[1720px] w-full mx-auto px-2.5 sm:px-5 lg:px-8 ${
-          isZeroScrollBoard
-            ? 'py-2 sm:py-3 flex flex-col min-h-0 lg:overflow-hidden'
-            : 'py-4 sm:py-6'
-        }`}
+        className="flex-1 max-w-[1720px] w-full mx-auto px-2.5 sm:px-5 lg:px-8 py-4 sm:py-6"
       >
         {logoutError && <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-900">
           <p>登出未確認。{logoutError}</p>
@@ -582,7 +576,7 @@ export default function App() {
           <SystemFeedback title="暫時無法確認登入狀態" detail="請重新載入，系統會再次確認你的登入狀態。" onRetry={retryLoading} />
         ) : (
           <>
-            {connectionMessage && !isZeroScrollBoard && activeView !== 'academic' && activeView !== 'login' && (
+            {connectionMessage && !viewingClassroomBoard && activeView !== 'academic' && activeView !== 'login' && (
               <p role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-950">{connectionMessage}</p>
             )}
             {/* 獨立路徑 0: /login (獨立登入頁面) */}
@@ -604,7 +598,7 @@ export default function App() {
 
             {/* 獨立路徑 1: /blackboard (教室電子黑板) */}
             {boardView === 'blackboard' && boardClassroom && (
-              <div className="w-full flex-1 min-h-0 flex flex-col lg:overflow-hidden">
+              <div className="w-full">
                 <BlackboardView
                   classroom={boardClassroom}
                   announcements={systemData.announcements}
@@ -735,7 +729,7 @@ export default function App() {
 
       {/* 頁尾 */}
       <footer
-        className={`${isZeroScrollBoard ? 'py-0.5' : 'py-2'} shrink-0 border-t border-slate-200 bg-white px-4 text-sm text-slate-700`}
+        className="py-2 shrink-0 border-t border-slate-200 bg-white px-4 text-sm text-slate-700"
       >
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-3">
           <p className="py-1 text-xs font-medium">© TWEXAM 版權所有</p>

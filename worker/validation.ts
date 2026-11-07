@@ -33,12 +33,16 @@ export function validateMutation(path: string, method: string, b: Record<string,
   } else if (/^\/api\/exam\/issue\/[^/]+$/.test(path)) {
     rules = { status: oneOf('pending','processing','resolved'), reply: text(3000,true), repliedBy: text(100) };
   } else if (/^\/api\/exam\/classroom(?:\/[^/]+)?$/.test(path)) {
+    if (method === 'DELETE') {
+      rules = {};
+    } else {
     rules = { classId: text(128,true), grade: (v) => integer(1,999)(v) || (typeof v === 'string' && /^\d{1,3}$/.test(v) && Number(v) >= 1), className: text(100), invigilator: text(100,true), teacherId: text(128,true), expectedCount: integer(1,10000), totalSeats: integer(1,10000), expected: object };
     if (b.teacherId && !state.teachers?.some(t => t.id === b.teacherId)) return '找不到指定教師';
     const room = state.classrooms.find(r => r.classId === decodeURIComponent(path.split('/')[4] ?? '') || r.classId === b.classId);
     const count = b.expectedCount ?? room?.expectedCount ?? 30;
     if (room && typeof count === 'number' && count < room.absentCount) return '應到人數不可小於已回報缺席人數';
     if (b.totalSeats !== undefined && (Number(b.totalSeats) < Number(count) || (room?.absentStudents.some(s => s.seatNo > Number(b.totalSeats))))) return '座位數不可小於應到人數或已記錄座號';
+    }
   } else if (path === '/api/exam/attendance') {
     rules = { classId: text(128), periodId: text(64), expectedPeriod: object, expectedLastUpdated: v => v === null || (typeof v === 'string' && v.length <= 30 && Number.isFinite(Date.parse(v))), expectedCount: integer(1,10000), presentCount: integer(0,10000), absentCount: integer(0,10000), absentStudents: v => Array.isArray(v) && v.length <= 10000 && v.every(s => object(s) && fields(s, { seatNo: integer(1,10000), name: text(100,true), reason: text(100,true) })) };
   } else if (path === '/api/exam/corrections') {

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { Building2, Pencil, Plus, Search, UserCheck } from 'lucide-react';
+import { Building2, Pencil, Plus, Search, Trash2, UserCheck } from 'lucide-react';
 import { examSync } from '../../services/examSync';
 import type { ClassroomExamState, SystemData } from '../../types/exam';
 import { availableGrades, gradeLabel } from '../../types/grades';
@@ -29,6 +29,7 @@ export function ClassroomSettings({ data, onManageInvigilation }: { data: System
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [acknowledged, setAcknowledged] = useState<Record<string, { room: ClassroomExamState; before?: ClassroomDetails }>>({});
+  const [removed, setRemoved] = useState<Record<string, true>>({});
   const dialog = useRef<HTMLDialogElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
 
@@ -45,6 +46,16 @@ export function ClassroomSettings({ data, onManageInvigilation }: { data: System
     }
   }
   if (pending !== acknowledged) setAcknowledged(pending);
+  let pendingRemoved = removed;
+  for (const id of Object.keys(removed)) {
+    if (!data.classrooms.some((room) => room.classId === id)) {
+      if (pendingRemoved === removed) pendingRemoved = { ...removed };
+      delete pendingRemoved[id];
+    } else {
+      liveRooms.delete(id);
+    }
+  }
+  if (pendingRemoved !== removed) setRemoved(pendingRemoved);
   const rooms = [...liveRooms.values()].sort((first, second) =>
     first.grade - second.grade || first.classId.localeCompare(second.classId, 'zh-TW', { numeric: true }));
   const grades = availableGrades(data.config, rooms);
@@ -119,6 +130,43 @@ export function ClassroomSettings({ data, onManageInvigilation }: { data: System
     }
   }
 
+  async function removeClassroom(room: ClassroomExamState) {
+    if (saving) return;
+    const assignedCount = (data.teachers ?? []).filter((teacher) => teacher.assignedClassId === room.classId).length;
+    if (!await confirmAction({
+      title: '確認刪除考場班級',
+      description: '刪除會一併拿掉該班出缺席資料，並把指派到這班的監考改回未指派。此操作無法復原。',
+      facts: [
+        { label: '班級代號', value: room.classId },
+        { label: '班級名稱', value: room.className },
+        { label: '年級', value: gradeLabel(data.config, room.grade) },
+        { label: '應到人數', value: `${room.expectedCount} 人` },
+        ...(assignedCount ? [{ label: '將改回未指派', value: `${assignedCount} 位監考老師` }] : [])
+      ],
+      confirmLabel: '確認刪除',
+      danger: true
+    })) return;
+
+    setSaving(true);
+    setError('');
+    try {
+      await examSync.deleteClassroom(room.classId);
+      setAcknowledged((entries) => {
+        if (!(room.classId in entries)) return entries;
+        const next = { ...entries };
+        delete next[room.classId];
+        return next;
+      });
+      setRemoved((entries) => ({ ...entries, [room.classId]: true }));
+      if (draft?.original?.classId === room.classId) closeEditor();
+      setNotice(`已刪除「${room.className}」（${room.classId}）。`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '無法刪除考場班級，請稍後再試。');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <section aria-labelledby="classroom-settings-title" className="min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
       {confirmationDialog}
@@ -127,7 +175,7 @@ export function ClassroomSettings({ data, onManageInvigilation }: { data: System
           <h3 ref={heading} id="classroom-settings-title" tabIndex={-1} className="flex items-center gap-2 text-lg font-black text-slate-950">
             <Building2 size={20} className="text-teal-800" aria-hidden="true" />考場班級與應到人數設定
           </h3>
-          <p className="mt-1 text-sm leading-6 text-slate-700">查看已設定的班級代號、班名與應到人數。選擇班級旁的「編輯」即可修改。</p>
+          <p className="mt-1 text-sm leading-6 text-slate-700">查看已設定的班級代號、班名與應到人數。選擇班級旁的「編輯」即可修改，或按「刪除」移除該班。</p>
         </div>
         <button type="button" disabled={!grades.length} onClick={() => openEditor()}
           className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-teal-800 px-3.5 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50">
@@ -179,10 +227,17 @@ export function ClassroomSettings({ data, onManageInvigilation }: { data: System
                       <span className="text-xs text-slate-600 [overflow-wrap:anywhere]">班級代號 {room.classId}</span>
                     </div>
                     <p className="col-start-1 row-start-2 text-slate-700 sm:col-start-2 sm:row-start-1">應到 <strong className="tabular-nums text-slate-950">{room.expectedCount}</strong> 人</p>
-                    <button type="button" className={`${secondary} col-start-2 row-span-2 row-start-1 sm:col-start-3 sm:row-span-1`}
-                      aria-label={`編輯 ${room.className}（${room.classId}）`} onClick={() => openEditor(room)}>
-                      <Pencil size={15} aria-hidden="true" />編輯
-                    </button>
+                    <div className="col-start-2 row-span-2 row-start-1 flex flex-wrap justify-end gap-2 sm:col-start-3 sm:row-span-1">
+                      <button type="button" className={secondary} disabled={saving}
+                        aria-label={`編輯 ${room.className}（${room.classId}）`} onClick={() => openEditor(room)}>
+                        <Pencil size={15} aria-hidden="true" />編輯
+                      </button>
+                      <button type="button" disabled={saving} onClick={() => removeClassroom(room)}
+                        aria-label={`刪除 ${room.className}（${room.classId}）`}
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 text-sm font-bold text-rose-800 hover:bg-rose-50 disabled:opacity-50">
+                        <Trash2 size={15} aria-hidden="true" />刪除
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

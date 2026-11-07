@@ -420,6 +420,12 @@ class ExamSyncService {
     return this.readData(res);
   }
 
+  public async deleteClassroom(classId: string): Promise<void> {
+    await this.readData(await this.request(`/api/exam/classroom/${encodeURIComponent(classId)}`, {
+      method: 'DELETE'
+    }));
+  }
+
   public async importTeachers(
     teachers: TeacherAccountInput[],
     mode: 'merge' | 'replace' = 'merge'

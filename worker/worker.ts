@@ -219,6 +219,7 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
           }
         }
         const previousTeachers = new Map(state.teachers?.map((teacher) => [teacher.id, teacher.passwordHash]));
+        const previousClassIds = state.classrooms.map((room) => room.classId);
         const requiresPeriodRecords = path === '/api/exam/attendance' || path === '/api/exam/state' || path === '/api/exam/periods' || path === '/ws';
         if (requiresPeriodRecords) this.loadPeriodAttendance(state);
         const checkInvigilation = method !== 'GET' && /^\/api\/exam\/(?:teachers|classroom|periods|config)(?:\/|$)/.test(path)
@@ -242,6 +243,12 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
             if (writesState) {
               const classrooms = state.classrooms.map(({ periodAttendance: _records, ...room }) => room);
               this.ctx.storage.kv.put(STATE_KEY, { ...state, classrooms });
+              const remainingClassIds = new Set(state.classrooms.map((room) => room.classId));
+              for (const classId of previousClassIds) {
+                if (!remainingClassIds.has(classId)) {
+                  this.ctx.storage.sql.exec('DELETE FROM exam_period_attendance WHERE class_id = ?', classId);
+                }
+              }
             }
             for (const { payload } of periodUpdates) {
               const { classId, periodId, attendance } = payload as PeriodAttendanceUpdate;

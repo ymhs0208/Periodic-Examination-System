@@ -1,5 +1,5 @@
 import { CalendarClock, Clock, ShieldCheck, Users } from 'lucide-react';
-import { publicAbsenceReason, type AbsentStudent, type ClassroomExamState, type ExamPeriod } from '../../types/exam';
+import { type AbsentStudent, type ClassroomExamState, type ExamPeriod } from '../../types/exam';
 
 export function ProjectionAttendance({ classroom, absences }: {
   classroom: ClassroomExamState;
@@ -41,7 +41,7 @@ export function ProjectionAttendance({ classroom, absences }: {
               {absences.map(({ seatNo, reason }) => (
                 <li key={seatNo}>
                   <span><strong>{String(seatNo).padStart(2, '0')}</strong> 號</span>
-                  <span>{publicAbsenceReason(reason) || '未註明'}</span>
+                  <span>{reason.trim() || '未註明'}</span>
                 </li>
               ))}
             </ul>

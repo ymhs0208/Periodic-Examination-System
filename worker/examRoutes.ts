@@ -459,6 +459,24 @@ api.patch('/api/exam/classroom/:classId', (c) => {
   return c.json({ success: true, data: classroom });
 });
 
+api.delete('/api/exam/classroom/:classId', (c) => {
+  const state = c.get('state');
+  const broadcast = c.get('broadcast');
+  const { classId } = c.req.param();
+  const classroom = state.classrooms.find((item) => item.classId === classId);
+  if (!classroom) {
+    return c.json({ success: false, error: '班級不存在' }, 404);
+  }
+
+  for (const teacher of state.teachers ?? []) {
+    if (teacher.assignedClassId === classId) teacher.assignedClassId = '';
+  }
+  state.classrooms = state.classrooms.filter((item) => item.classId !== classId);
+
+  broadcast('INIT_STATE', state);
+  return c.json({ success: true, data: { classId } });
+});
+
 // Add a new classroom
 api.post('/api/exam/classroom', (c) => {
   const state = c.get('state');

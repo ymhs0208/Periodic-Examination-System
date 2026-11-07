@@ -580,3 +580,20 @@
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
   }
 }
+
+/* Windowed board: keep the same grid, but grow with content so nothing is clipped. */
+.projection-board--windowed .projection-layout {
+  overflow: visible;
+  grid-template-rows: auto auto;
+}
+.projection-board--windowed .projection-notices,
+.projection-board--windowed .projection-overview {
+  overflow: visible;
+  min-height: min-content;
+}
+@media (min-width: 760px) and (min-aspect-ratio: 4/3) {
+  .projection-board--windowed .projection-layout {
+    grid-template-rows: auto;
+    align-items: start;
+  }
+}

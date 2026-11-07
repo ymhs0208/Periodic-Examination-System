@@ -11,9 +11,8 @@ export function validTeacherPassword(password: unknown): password is string {
     !/^(.)\1+$/u.test(value) && !['password1234', '123456789012', 'qwerty123456', 'abcdefghijkl'].includes(value.toLowerCase());
 }
 
-export function publicAbsenceReason(_reason: string): string {
-  // Public views must never disclose health, family or other absence reasons.
-  return '';
+export function publicAbsenceReason(reason: string): string {
+  return reason.trim();
 }
 
 export interface AbsentStudent {

@@ -4,8 +4,8 @@ import { announcementStatus } from '../src/types/announcements';
 import { adminState, type StoredExamState } from './passwords';
 
 export function publicAbsences(students: AbsentStudent[]) {
-  return students.map(({ seatNo }) => ({
-    seatNo, name: '', reason: ''
+  return students.map(({ seatNo, reason }) => ({
+    seatNo, name: '', reason
   }));
 }
 

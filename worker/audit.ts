@@ -8,7 +8,7 @@ const routes: [RegExp, AuditAction][] = [
   [/^PATCH \/api\/exam\/teachers\/([^/]+)\/assign$/, 'invigilation'],
   [/^PATCH \/api\/exam\/period-invigilators$/, 'invigilation'],
   [/^POST \/api\/exam\/attendance$/, 'attendance'],
-  [/^(?:POST \/api\/exam\/classroom|PATCH \/api\/exam\/classroom\/([^/]+))$/, 'classroom'],
+  [/^(?:POST \/api\/exam\/classroom|(?:PATCH|DELETE) \/api\/exam\/classroom\/([^/]+))$/, 'classroom'],
   [/^POST \/api\/exam\/issue$/, 'issueReport'],
   [/^PATCH \/api\/exam\/issue\/([^/]+)$/, 'issueUpdate'],
   [/^POST \/api\/exam\/corrections$/, 'correctionSubmit'],

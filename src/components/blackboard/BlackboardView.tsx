@@ -132,7 +132,7 @@ export const BlackboardView: React.FC<BlackboardViewProps> = ({
           ? 'projection-board fixed inset-0 z-50 h-dvh w-screen overflow-clip rounded-none border-0'
           : isEmbedded
           ? 'projection-board relative w-full rounded-2xl border border-slate-200/90 xl:h-[780px] h-auto shadow-xs overflow-hidden'
-          : 'projection-board relative w-full flex-1 min-h-0 lg:h-full rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden'
+          : 'projection-board projection-board--windowed relative w-full rounded-2xl border border-slate-200/90 shadow-xs'
       } text-slate-900 flex flex-col select-none`}
     >
       <div ref={fullscreenContentRef}
@@ -143,7 +143,7 @@ export const BlackboardView: React.FC<BlackboardViewProps> = ({
         connectionMessage={connectionMessage} onChooseClassroom={onChooseClassroom} onToggleFullscreen={isEmbedded ? undefined : toggleFullscreen} />
 
       <div
-        className={`flex-1 projection-layout min-h-0 ${isFullscreen ? 'overflow-hidden' : 'overflow-auto'}${focusAnnouncements ? ' projection-layout-focus' : !relevantAnnouncements.length ? ' projection-layout-quiet' : ''}`}
+        className={`flex-1 projection-layout ${isFullscreen ? 'min-h-0 overflow-hidden' : ''}${focusAnnouncements ? ' projection-layout-focus' : !relevantAnnouncements.length ? ' projection-layout-quiet' : ''}`}
       >
         <div className="projection-notices">
           <AnnouncementProjection key={classroom.classId} announcements={relevantAnnouncements} focused={focusAnnouncements} fitToScreen={isFullscreen}
