@@ -50,25 +50,25 @@ export function TeacherAssignments({ classroom, config, periods = [], now, onSel
                       const ended = date < today || (date === today && period.endTime <= time);
                       const reported = classroomForPeriod(classroom, period).statusReported;
                       return (
-                        <li key={period.id} className={`grid gap-3 rounded-xl border p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-4 ${ongoing ? 'border-teal-300 bg-teal-50' : 'border-slate-200 bg-slate-50'}`}>
+                        <li key={period.id} className={`grid gap-3 rounded-xl border p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4 sm:px-4 ${ongoing ? 'border-teal-300 bg-teal-50' : 'border-slate-200 bg-slate-50'}`}>
                           <div className="min-w-0">
-                            <p className="font-black text-slate-950 [overflow-wrap:anywhere]">{period.subject}</p>
-                            <p className="mt-0.5 font-mono text-sm font-bold text-slate-700">{period.startTime}–{period.endTime}</p>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <p className="min-w-0 font-black text-slate-950 [overflow-wrap:anywhere]">{period.subject}</p>
+                              <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${ongoing ? 'bg-teal-100 text-teal-950' : 'bg-white text-slate-700'}`}>
+                                {ongoing && <span className="size-1.5 rounded-full bg-teal-700" aria-hidden="true" />}
+                                {ongoing ? '進行中' : ended ? '已結束' : '未開始'}
+                              </span>
+                            </div>
+                            <p className="mt-1 font-mono text-sm font-bold text-slate-700">{period.startTime}–{period.endTime}</p>
                           </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className={`rounded-full px-2 py-1 text-xs font-bold ${ongoing ? 'bg-teal-100 text-teal-950' : 'bg-white text-slate-700'}`}>
-                              {ongoing ? '進行中' : ended ? '已結束' : '未開始'}
-                            </span>
-                            {onSelectPeriod ? (
-                              <button type="button" onClick={() => onSelectPeriod(period.id)}
-                                aria-label={`前往點名，${periodLabel(period)}，${reported ? '已回報' : '尚未回報'}`}
-                                className="inline-flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-2.5 py-1 text-sm font-bold text-teal-900 hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-teal-700">
-                                前往點名
-                                <span className="wb-button-status" data-tone={reported ? 'success' : undefined}>{reported ? '已回報' : '尚未回報'}</span>
-                                <ArrowRight size={15} aria-hidden="true" />
-                              </button>
-                            ) : reported && <span className="wb-button-status" data-tone="success">已回報</span>}
-                          </div>
+                          {onSelectPeriod ? (
+                            <button type="button" onClick={() => onSelectPeriod(period.id)}
+                              aria-label={`前往點名，${periodLabel(period)}，${reported ? '已回報' : '尚未回報'}`}
+                              className="flex min-h-11 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-teal-200 bg-white px-3 py-2 text-sm font-bold text-teal-900 hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-teal-700 sm:w-auto sm:min-w-44">
+                              <span className="wb-button-status" data-tone={reported ? 'success' : ongoing || ended ? 'warning' : undefined}>{reported ? '已回報' : '尚未回報'}</span>
+                              <span className="inline-flex shrink-0 items-center gap-1.5">前往點名<ArrowRight size={15} aria-hidden="true" /></span>
+                            </button>
+                          ) : reported && <span className="wb-button-status justify-self-start" data-tone="success">已回報</span>}
                         </li>
                       );
                     })}
