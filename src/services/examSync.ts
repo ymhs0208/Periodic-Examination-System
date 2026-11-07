@@ -1,3 +1,4 @@
+import { recordServerTime, serverNowMs } from '../types/time';
 import type {
   SystemData,
   ClassroomExamState,
@@ -163,7 +164,7 @@ class ExamSyncService {
               this.notifySubscribers('LIVE_CONNECTION', 'connected');
             }
 
-            if (evType === 'ANNOUNCEMENT_PUBLISHED' && announcementStatus(payload, Date.now()) === 'active') {
+            if (evType === 'ANNOUNCEMENT_PUBLISHED' && announcementStatus(payload, serverNowMs()) === 'active') {
               this.playChime(payload.type === 'correction' ? 'urgent' : 'notice');
             } else if (evType === 'ISSUE_REPORTED') {
               this.playChime('urgent');
@@ -211,7 +212,9 @@ class ExamSyncService {
     }, REQUEST_TIMEOUT);
     if (tracked) this.notifySubscribers('REQUEST_STARTED', { id, reading: method === 'GET' });
     try {
+      const sentAt = Date.now();
       const response = await fetch(path, { ...options, signal: controller.signal });
+      recordServerTime(Number(response.headers.get('X-Server-Time')), sentAt, Date.now());
       if (response.status === 428 && !retried && reauthenticationHandler) {
         window.clearTimeout(timeout);
         const verified = await reauthenticationHandler();

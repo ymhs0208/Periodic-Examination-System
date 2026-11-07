@@ -62,9 +62,10 @@ try {
     assert.match(html, /網路離線/); assert.match(html, /舊資料/); assert.match(html, /全螢幕投影/);
     assert.doesNotMatch(html, /絕不可投影姓名|絕不可投影原因|不應投影帳號/);
   });
-  check('header entry visible only to admin', () => {
+  check('header does not show board entries', () => {
     const header = (admin) => renderToStaticMarkup(React.createElement(Header, { activeView: 'academic', currentPath: '/board/academic', isAdminAuthed: admin, isInvigilatorAuthed: false, autoOpenMenuSignal: 0, loggedInUsername: '', onViewChange() {}, onNavigateAdminTab() {}, onLogout() {} }));
-    assert.match(header(true), /href="\/board\/academic"/); assert.doesNotMatch(header(false), /href="\/board\/academic"/);
+    assert.doesNotMatch(header(true), /教務處看板|出席即時看板|教室電子黑板/);
+    assert.doesNotMatch(header(false), /href="\/board\/academic"/);
   });
   check('direct route asks for administrator login', () => assert.match(renderToStaticMarkup(React.createElement(LoginPage, { config: state().config, intendedView: 'academic', onLoginSuccess() {}, onNavigateView() {} })), /教務處看板登入|教務管理員帳號/));
   console.log(`All ${count} academic-board checks passed.`);

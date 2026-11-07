@@ -1,3 +1,4 @@
+import { serverNow } from '../../types/time';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import type { AbsentStudent, ClassroomExamState, SystemData } from '../../types/exam';
@@ -121,9 +122,9 @@ function ReportTable({ label, columns, headers, children, className = '' }: {
 }
 
 export function OfficialExamReport({ data, classrooms, detailScope, audienceLabel, issueLabel }: ReportProps) {
-  const [createdAt, setCreatedAt] = useState(() => new Date().toISOString());
+  const [createdAt, setCreatedAt] = useState(() => serverNow().toISOString());
   useEffect(() => {
-    const refreshPrintTime = () => flushSync(() => setCreatedAt(new Date().toISOString()));
+    const refreshPrintTime = () => flushSync(() => setCreatedAt(serverNow().toISOString()));
     window.addEventListener('beforeprint', refreshPrintTime);
     return () => window.removeEventListener('beforeprint', refreshPrintTime);
   }, []);

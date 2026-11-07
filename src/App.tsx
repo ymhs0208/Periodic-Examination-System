@@ -1,3 +1,4 @@
+import { serverNow } from './types/time';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -40,7 +41,7 @@ const pageTitles: Record<ActiveView, string> = {
 const policyViews: PolicyView[] = ['privacy', 'disclaimer'];
 
 const adminPageTitles: Record<AdminTab, string> = {
-  matrix: '考場看板', broadcast: '公告與更正', issues: '考場通報', teachers: '教師帳號',
+  home: '', matrix: '考場看板', broadcast: '公告與更正', issues: '考場通報', teachers: '教師帳號',
   assign: '監考指派', reports: '統計報表', settings: '考務設定', logs: '操作紀錄'
 };
 
@@ -111,6 +112,7 @@ function parseRouteFromPathname(pathname: string): {
 
   if (first === 'admin') {
     const validTabs: AdminTab[] = [
+      'home',
       'matrix',
       'broadcast',
       'issues',
@@ -120,14 +122,17 @@ function parseRouteFromPathname(pathname: string): {
       'reports',
       'logs'
     ];
+    if (!second || second === 'home') {
+      return { view: 'admin', adminTab: 'home', normalizedPath: '/admin' };
+    }
     const tab: AdminTab = validTabs.includes(second as AdminTab)
       ? (second as AdminTab)
-      : 'matrix';
+      : 'home';
     return {
       view: 'admin',
       adminTab: tab,
       normalizedPath: tab === 'settings' ? adminSettingsPath(parseAdminSettingsPage(segments[2]))
-        : second && validTabs.includes(second as AdminTab) ? `/admin/${tab}` : '/admin'
+        : tab === 'home' ? '/admin' : `/admin/${tab}`
     };
   }
 
@@ -145,7 +150,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<ActiveView>(initialRoute.view);
   const [intendedView, setIntendedView] = useState<ActiveView | null>(null);
   const [activeAdminTab, setActiveAdminTab] = useState<AdminTab>(
-    initialRoute.adminTab || 'matrix'
+    initialRoute.adminTab || 'home'
   );
   const [currentPath, setCurrentPath] = useState<string>(initialRoute.normalizedPath);
   const [selectedClassId, setSelectedClassId] = useState<string>(
@@ -200,7 +205,7 @@ export default function App() {
     const targetPath = VIEW_PATHS[view];
     setActiveView(view);
     if (view === 'invigilator') setInvigilatorTab('attendance');
-    if (view === 'admin') setActiveAdminTab('matrix');
+    if (view === 'admin') setActiveAdminTab('home');
     setInvigilatorPeriodId(undefined);
     setCurrentPath(targetPath);
     if (window.location.pathname !== targetPath) {
@@ -219,7 +224,7 @@ export default function App() {
   }, []);
 
   const navigateToAdminTab = useCallback((tab: AdminTab) => {
-    const targetPath = `/admin/${tab}`;
+    const targetPath = tab === 'home' ? '/admin' : `/admin/${tab}`;
     setActiveView('admin');
     setActiveAdminTab(tab);
     setCurrentPath(targetPath);
@@ -268,7 +273,7 @@ export default function App() {
         setConnectionError(false);
       }
       if (['INIT_STATE', 'PERIOD_ATTENDANCE_UPDATED', 'ATTENDANCE_UPDATED', 'CLASSROOM_UPDATED', 'CLASSROOM_ADDED', 'ISSUE_REPORTED', 'ISSUE_UPDATED', 'CONFIG_UPDATED'].includes(event)) {
-        setLastDataReceivedAt(new Date().toISOString());
+        setLastDataReceivedAt(serverNow().toISOString());
       }
       setSystemData((prev) => {
         if (event === 'INIT_STATE') {
@@ -382,7 +387,7 @@ export default function App() {
       .then((data) => {
         if (active && !receivedSnapshot) {
           setSystemData(data);
-          setLastDataReceivedAt(new Date().toISOString());
+          setLastDataReceivedAt(serverNow().toISOString());
         }
       })
       .catch(() => {
@@ -710,6 +715,7 @@ export default function App() {
                     onAdminTabChange={navigateToAdminTab}
                     activeSettingsPage={activeSettingsPage}
                     onSettingsPageChange={navigateToAdminSettings}
+                    onNavigateView={navigateToView}
                   />
                 ) : (
                   <LoginPage

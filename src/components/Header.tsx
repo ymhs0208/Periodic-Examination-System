@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import {
   ArrowRight, Building2, ChevronDown, ClipboardCheck, GraduationCap, History, KeyRound, LayoutGrid,
-  LogOut, Monitor, Settings, ShieldCheck, UserCheck, Users, X, type LucideIcon
+  LogOut, Settings, ShieldCheck, UserCheck, Users, X, type LucideIcon
 } from 'lucide-react';
 import type { AdminTab } from './admin/AdminView';
 import type { PolicyView } from './PolicyPage';
@@ -42,20 +42,13 @@ interface NavigationItem {
   icon: LucideIcon;
 }
 
-const academicItem: NavigationItem = { view: 'academic', label: '教務處看板', description: '全校考場監看、異常優先與投影模式', icon: Monitor };
-
 const adminItems: NavigationItem[] = [
-  academicItem,
-  { view: 'admin', label: '教務管理中心', description: '考場總覽、公告與通報處理', icon: Building2 },
+  { view: 'admin', label: '教務管理中心', description: '開啟教室黑板、出席看板與教務處看板', icon: Building2 },
+  { view: 'admin', tab: 'matrix', label: '考場看板', description: '查看各班點名進度與考場狀況', icon: LayoutGrid },
   { view: 'admin', tab: 'teachers', label: '教師帳號管理', description: '匯入名冊與管理登入帳號', icon: Users },
   { view: 'admin', tab: 'assign', label: '監考指派', description: '安排各班的監考老師', icon: UserCheck },
   { view: 'admin', tab: 'settings', label: '考程與班級設定', description: '維護考程、考場與管理員帳號', icon: Settings },
   { view: 'admin', tab: 'logs', label: '操作紀錄', description: '查看登入及考務異動', icon: History }
-];
-
-const publicItems: NavigationItem[] = [
-  { view: 'blackboard', label: '教室電子黑板', description: '投影考程、公告與試題更正', icon: Monitor },
-  { view: 'attendance', label: '出席即時看板', description: '查看各班出席統計與缺席明細', icon: LayoutGrid }
 ];
 
 const invigilatorItem: NavigationItem = {
@@ -135,8 +128,7 @@ export function Header({
     ...(isAdminAuthed ? [{ label: '教務管理中心', items: adminItems }] : []),
     { label: '考場作業', items: [canSubmitCorrections
       ? { ...invigilatorItem, description: '查看監考安排與試題更正送審' }
-      : invigilatorItem] },
-    { label: '公開看板', items: publicItems }
+      : invigilatorItem] }
   ];
 
   function isActiveItem(item: NavigationItem) {
@@ -149,7 +141,7 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#10243d] text-white shadow-sm">
-      <div className="relative mx-auto grid max-w-[1720px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 px-3 sm:gap-x-4 sm:px-6 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:px-8">
+      <div className="relative mx-auto grid max-w-[1720px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 px-3 sm:gap-x-4 sm:px-6 lg:px-8">
         <a
           href={VIEW_PATHS.blackboard}
           onClick={(event) => navigate(event, 'blackboard')}
@@ -165,23 +157,9 @@ export function Header({
           </span>
         </a>
 
-        <nav aria-label="看板導覽" className={`col-span-2 row-start-2 grid ${isAdminAuthed ? 'grid-cols-2 min-[520px]:grid-cols-3' : 'grid-cols-2'} gap-1.5 border-t border-white/10 py-1.5 md:col-span-1 md:col-start-2 md:row-start-1 md:flex md:border-0 md:py-0`}>
-          {[...publicItems, ...(isAdminAuthed ? [academicItem] : [])].map(({ view, label, icon: Icon }) => (
-            <a
-              key={view}
-              href={VIEW_PATHS[view]}
-              aria-current={activeView === view ? 'page' : undefined}
-              onClick={(event) => navigate(event, view)}
-              className={`${view === 'academic' ? 'col-span-2 min-[520px]:col-span-1' : ''} inline-flex min-h-9 items-center justify-center gap-2 rounded-lg px-2.5 text-xs font-bold whitespace-nowrap text-slate-200 hover:bg-white/10 hover:text-white aria-[current=page]:bg-teal-200/15 aria-[current=page]:text-teal-100 sm:px-3 sm:text-sm ${focusStyle}`}
-            >
-              <Icon size={16} aria-hidden="true" />{label}
-            </a>
-          ))}
-        </nav>
-
         <div
           ref={accountRef}
-          className="col-start-2 row-start-1 justify-self-end md:relative md:col-start-3"
+          className="col-start-2 row-start-1 justify-self-end md:relative"
           onBlur={(event) => {
             if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) {
               setIsMenuOpen(false);

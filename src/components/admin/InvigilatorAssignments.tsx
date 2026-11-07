@@ -1,3 +1,4 @@
+import { serverNow } from '../../types/time';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { CalendarClock, CheckCircle2, ClipboardList, Pencil, Search, UserPlus, UsersRound } from 'lucide-react';
 import { examSync } from '../../services/examSync';
@@ -99,7 +100,7 @@ export function InvigilatorAssignments({ data, onManageTeachers, onOpenSchedule 
     if (day) day.push(item);
     else periodsByDate.set(item.date, [item]);
   }
-  const [referenceTime] = useState(() => new Date());
+  const [referenceTime] = useState(() => serverNow());
   const [requestedPeriod, setRequestedPeriod] = useState('');
   const period = requestedPeriod === '@default' ? undefined :
     periods.find((item) => item.id === requestedPeriod) ?? preferredPeriod(periods, referenceTime);

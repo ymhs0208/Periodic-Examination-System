@@ -1,22 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useServerClock } from './useServerClock';
 import type { ExamPeriod } from '../types/exam';
 import { periodLabel } from '../types/examSchedule';
 
 export function useExamClock() {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const update = () => {
-      const time = new Date();
-      setNow((previous) => Math.floor(previous.getTime() / 60_000) === Math.floor(time.getTime() / 60_000) ? previous : time);
-    };
-    const timer = window.setInterval(update, 1000);
-    document.addEventListener('visibilitychange', update);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', update);
-    };
-  }, []);
-  return now;
+  return useServerClock(60_000);
 }
 
 export function ExamPeriodSelect({ periods, value, onChange, autoLabel }: {

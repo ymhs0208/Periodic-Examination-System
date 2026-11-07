@@ -752,6 +752,7 @@ export default {
     secured.headers.set('Referrer-Policy', 'no-referrer');
     secured.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=()');
     if (pathname.startsWith('/api/')) secured.headers.set('Cache-Control', 'no-store');
+    secured.headers.set('X-Server-Time', String(Date.now()));
     return secured;
   }
 } satisfies ExportedHandler<WorkerEnv>;

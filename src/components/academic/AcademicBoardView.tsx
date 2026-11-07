@@ -1,3 +1,4 @@
+import { useServerClock } from '../useServerClock';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, Maximize, Minimize, Monitor, Pause, Play, RotateCw, Wifi, WifiOff } from 'lucide-react';
 import type { SystemData } from '../../types/exam';
@@ -36,7 +37,7 @@ function RoomCard({ item }: { item: AcademicRoom }) {
 }
 
 export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, onReconnect, onOpenOperations }: Props) {
-  const [now, setNow] = useState(() => new Date());
+  const now = useServerClock(1000);
   const [projection, setProjection] = useState(false);
   const [nativeFullscreen, setNativeFullscreen] = useState(false);
   const [fullscreenNotice, setFullscreenNotice] = useState('');
@@ -53,10 +54,6 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
   const visibleRooms = projection ? rooms.slice(currentPage * capacity, (currentPage + 1) * capacity) : rooms;
   const connected = liveConnection === 'connected';
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
   useEffect(() => {
     const changed = () => {
       const active = document.fullscreenElement === boardRef.current;
@@ -82,8 +79,8 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
     if (!projection || !gridAreaRef.current) return;
     const area = gridAreaRef.current;
     const resize = () => {
-      const columns = Math.max(1, Math.floor((area.clientWidth + 12) / 244));
-      const rows = Math.max(1, Math.floor((area.clientHeight + 12) / 264));
+      const columns = Math.max(1, Math.floor((area.clientWidth + 14) / 264));
+      const rows = Math.max(1, Math.floor((area.clientHeight + 14) / 244));
       setCapacity(columns * rows);
       area.style.setProperty('--academic-columns', String(columns));
     };
@@ -121,8 +118,8 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
   return <section ref={boardRef} className={`academic-board${projection ? ' academic-board--projection' : ''}`} aria-labelledby="academic-board-title">
     <header className="academic-header">
       <div className="academic-brand"><span className="academic-brand-icon"><Monitor aria-hidden="true" /></span><div>
-        <p>{data.config.schoolName || '段考考務即時管理系統'} · {data.config.examName || '全校考場監看'}</p>
-        <h1 id="academic-board-title">教務處總覽看板</h1>
+        <p><span className="academic-eyebrow">教務處總覽看板</span>{data.config.schoolName || '段考考務即時管理系統'}</p>
+        <h1 id="academic-board-title">{data.config.examName || '全校考場監看'}</h1>
       </div></div>
       <div className="academic-header-right"><div className="academic-clock"><strong>{clock.format(now)}</strong><span>{overview.today} · 台北時間</span></div>
         <div className="academic-actions">

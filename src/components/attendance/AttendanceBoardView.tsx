@@ -1,3 +1,4 @@
+import { useServerClock } from '../useServerClock';
 import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Clock3, LayoutGrid,
@@ -59,7 +60,7 @@ export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom
   const [mode, setMode] = useState<'school' | 'classroom'>(initialMode);
   const [requestedPeriodId, setRequestedPeriodId] = useState('');
   const [selectedGradeFilter, setGradeFilter] = useState('all');
-  const [currentTime, setCurrentTime] = useState(() => new Date());
+  const currentTime = useServerClock(1000);
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenError, setFullscreenError] = useState(false);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -83,11 +84,9 @@ export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom
   const attendanceRate = (present: number, expected: number) => expected > 0 ? `${(present / expected * 100).toFixed(1)}%` : '—';
 
   useEffect(() => {
-    const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
     const updateFullscreen = () => setFullscreen(document.fullscreenElement === boardRef.current);
     document.addEventListener('fullscreenchange', updateFullscreen);
     return () => {
-      window.clearInterval(timer);
       document.removeEventListener('fullscreenchange', updateFullscreen);
     };
   }, []);

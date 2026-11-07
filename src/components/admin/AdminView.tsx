@@ -1,9 +1,11 @@
+import { formatTaipeiClock, formatTaipeiDateTime, serverNow, serverNowMs, taipeiDateStamp } from '../../types/time';
 import { parseDelimited } from '../../services/parseDelimited';
 import { validTeacherPassword, MIN_TEACHER_PASSWORD_LENGTH } from '../../types/exam';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
   Building2,
+  Monitor,
   AlertTriangle,
   CheckCircle2,
   FileEdit,
@@ -58,6 +60,7 @@ import type {
 } from '../../types/exam';
 
 export type AdminTab =
+  | 'home'
   | 'matrix'
   | 'broadcast'
   | 'issues'
@@ -77,6 +80,7 @@ interface AdminViewProps {
   onAdminTabChange?: (tab: AdminTab) => void;
   activeSettingsPage?: AdminSettingsPage;
   onSettingsPageChange?: (page?: AdminSettingsPage) => void;
+  onNavigateView?: (view: 'blackboard' | 'attendance' | 'academic') => void;
 }
 
 const announcementTimeFormat = new Intl.DateTimeFormat('sv-SE', {
@@ -102,7 +106,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   activeAdminTab,
   onAdminTabChange,
   activeSettingsPage,
-  onSettingsPageChange
+  onSettingsPageChange,
+  onNavigateView
 }) => {
   const { confirmAction, confirmationDialog } = useActionConfirmation();
   const [internalTab, setInternalTab] = useState<AdminTab>('matrix');
@@ -456,7 +461,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `全校監考教師與指派清冊_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `全校監考教師與指派清冊_${taipeiDateStamp()}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -494,7 +499,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     setPublishSuccess(false);
     const startsAt = parseAnnouncementTime(annoStartsAt);
     const endsAt = parseAnnouncementTime(annoEndsAt);
-    const now = Date.now();
+    const now = serverNowMs();
     if (startsAt === null || endsAt === null) {
       setPublishError('請輸入有效的顯示日期和時間。');
       return;
@@ -706,7 +711,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const totalSummaryRow = buildGradeStatRow('全校總計', sortedClassrooms);
 
   const exportAttendanceCSV = () => {
-    const nowStr = new Date().toLocaleString('zh-TW', { hour12: false });
+    const nowStr = formatTaipeiDateTime(serverNow());
     const examDateStr = attendanceData.config.examDate;
     const serialNo = `EXAM-${examDateStr.replace(/-/g, '')}-${attendanceData.config.subject}`;
 
@@ -950,7 +955,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           [
             idx + 1,
             a.type === 'correction' ? '試題更正' : '考務公告',
-            new Date(a.publishedAt).toLocaleString('zh-TW', { hour12: false }),
+            formatTaipeiDateTime(a.publishedAt),
             a.subject,
             getTargetAudienceLabel(a.targetAudience),
             a.title,
@@ -992,7 +997,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         lines.push(
           [
             idx + 1,
-            new Date(iss.createdAt).toLocaleString('zh-TW', { hour12: false }),
+            formatTaipeiDateTime(iss.createdAt),
             iss.classId,
             iss.className,
             getIssueCategoryLabel(iss.type),
@@ -1129,6 +1134,61 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const currentSection = sections.find((section) => section.id === activeTab) ?? sections[0];
   const CurrentIcon = currentSection.icon;
   const examDetails = [data.config.examName, data.config.subject, data.config.examDate].filter(Boolean);
+  if (activeTab === 'home') {
+    const portalEntries = [
+      { view: 'blackboard' as const, href: '/blackboard', label: '教室電子黑板', description: '投影考程、公告與試題更正', icon: Monitor },
+      { view: 'attendance' as const, href: '/attendance', label: '出席即時看板', description: '查看各班出席統計與缺席明細', icon: LayoutGrid },
+      { view: 'academic' as const, href: '/board/academic', label: '教務處看板', description: '全校考場監看、異常優先與投影模式', icon: Radio }
+    ];
+    return (
+      <div className={`print-report-root flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm ${isEmbedded ? 'xl:h-[820px] xl:overflow-y-auto' : ''}`}>
+        {confirmationDialog}
+        <section className="attendance-banner no-print relative isolate overflow-hidden px-4 py-5 text-white sm:px-7 sm:py-7">
+          <div className="attendance-banner-pattern pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3" aria-hidden="true" />
+          <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-teal-200"><Building2 size={16} aria-hidden="true" />教務管理中心</p>
+          <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-4xl">教務管理中心</h1>
+          {examDetails.length > 0 && <p className="mt-2 text-sm text-slate-200">{examDetails.join(' · ')}</p>}
+        </section>
+        <div className="bg-slate-50 p-4 sm:p-7">
+          <nav aria-label="看板入口" className="grid gap-3 sm:grid-cols-3">
+            {portalEntries.map(({ view, href, label, description, icon: Icon }) => (
+              <a key={view} href={href}
+                onClick={(event) => {
+                  if (!onNavigateView || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  onNavigateView(view);
+                }}
+                className="flex min-h-36 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
+                <span className="grid size-12 place-items-center rounded-xl bg-teal-50 text-teal-800"><Icon size={24} aria-hidden="true" /></span>
+                <span className="mt-4 text-lg font-black text-slate-950">{label}</span>
+                <span className="mt-1 text-sm leading-6 text-slate-600">{description}</span>
+              </a>
+            ))}
+          </nav>
+          <div className="mt-6">
+            <h2 className="mb-2 text-sm font-bold text-slate-600">考務作業</h2>
+            <nav aria-label="教務功能" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {sections.map((section) => {
+                const Icon = section.icon;
+                return (
+                  <a key={section.id} href={`/admin/${section.id}`}
+                    onClick={(event) => {
+                      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                      event.preventDefault();
+                      setActiveTab(section.id);
+                    }}
+                    className="flex min-h-11 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
+                    <Icon size={16} className="shrink-0 text-teal-800" aria-hidden="true" />
+                    {section.label}
+                  </a>
+                );
+              })}
+            </nav>
+          </div>
+        </div>
+      </div>
+    );
+  }
   const announcementScheduleFields = (
     <fieldset className="min-w-0 space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 pb-3">
       <legend className="px-1 text-sm font-black text-slate-900">顯示時段（台灣時間）</legend>
@@ -1793,7 +1853,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     </span>
 
                     <span className="text-[11px] text-slate-600 font-bold flex items-center justify-between">
-                      <span className="font-mono tabular-nums">{new Date(issue.createdAt).toLocaleTimeString('zh-TW')} 通報</span>
+                      <span className="font-mono tabular-nums">{formatTaipeiClock(issue.createdAt)} 通報</span>
                       {issue.reply && <span className="text-teal-800 font-black">已回覆派遣</span>}
                     </span>
                   </button>

@@ -1,3 +1,4 @@
+import { serverNow } from '../../types/time';
 import { ArrowRight, CalendarDays, ClipboardList, DoorOpen } from 'lucide-react';
 import { useId } from 'react';
 import type { ClassroomExamState, ExamConfig, ExamPeriod } from '../../types/exam';
@@ -16,7 +17,7 @@ export function TeacherAssignments({ classroom, config, periods = [], now, onSel
   const titleId = useId();
   const Subtitle = heading === 'h1' ? 'h2' : 'h3';
   const DayTitle = heading === 'h1' ? 'h3' : 'h4';
-  const [today, time] = taipeiDateTime.format(now ?? new Date()).split(' ');
+  const [today, time] = taipeiDateTime.format(now ?? serverNow()).split(' ');
   const byDate = new Map<string, ExamPeriod[]>();
   for (const period of periods) {
     const day = byDate.get(period.date);

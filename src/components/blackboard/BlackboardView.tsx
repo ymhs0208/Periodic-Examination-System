@@ -1,3 +1,4 @@
+import { useServerClock } from '../useServerClock';
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   Clock,
@@ -34,7 +35,7 @@ export const BlackboardView: React.FC<BlackboardViewProps> = ({
   connectionMessage,
   isEmbedded = false
 }) => {
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const currentTime = useServerClock(1000);
   const [today, taipeiTime] = taipeiDateTime.format(currentTime).split(' ');
   const todaysPeriods = examPeriods(examConfig).filter((period) => period.date === today && periodApplies(period, baseClassroom));
   const period = activePeriod(todaysPeriods, currentTime);
@@ -85,10 +86,6 @@ export const BlackboardView: React.FC<BlackboardViewProps> = ({
     };
   }, [isFullscreen]);
 
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     const handleFullscreenChange = () => {

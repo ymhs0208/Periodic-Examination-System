@@ -1,3 +1,4 @@
+import { serverNow } from '../../types/time';
 import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { CalendarDays, CircleCheck, Pencil, Plus, Trash2 } from 'lucide-react';
 import { examSync } from '../../services/examSync';
@@ -51,7 +52,7 @@ export function ExamScheduleSettings({ data }: { data: SystemData }) {
       isNew: !existing,
       period: existing ?? {
         id: crypto.randomUUID(),
-        date: current.at(-1)?.date || taipeiDateTime.format(new Date()).slice(0, 10),
+        date: current.at(-1)?.date || taipeiDateTime.format(serverNow()).slice(0, 10),
         startTime: '', endTime: '', subject: '', grades: []
       }
     });
