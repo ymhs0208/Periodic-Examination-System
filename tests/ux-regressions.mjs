@@ -9,6 +9,29 @@ let passed = 0;
 const check = (label, run) => { run(); passed++; console.log(`PASS ${label}`); };
 try {
   const { parseDelimited } = await server.ssrLoadModule('/src/services/parseDelimited.ts');
+  const { attendanceDraftKey, discardOtherAttendanceDrafts } = await server.ssrLoadModule('/src/services/attendanceDrafts.ts');
+  check('attendance drafts are account-scoped and unowned drafts are discarded', () => {
+    const originalWindow = globalThis.window;
+    const teacher = 'invigilator:account';
+    const own = attendanceDraftKey(teacher, '101', 'p1');
+    const other = attendanceDraftKey('admin:account', '101', 'p1');
+    const legacy = 'exam-attendance-draft:101:p1';
+    const keys = new Set([own, other, legacy, 'unrelated-setting']);
+    globalThis.window = { sessionStorage: {
+      get length() { return keys.size; },
+      key: (index) => [...keys][index],
+      removeItem: (key) => keys.delete(key)
+    } };
+    try {
+      assert.notEqual(own, other);
+      discardOtherAttendanceDrafts(teacher);
+      assert.deepEqual([...keys], [own, 'unrelated-setting']);
+      discardOtherAttendanceDrafts();
+      assert.deepEqual([...keys], ['unrelated-setting']);
+    } finally {
+      globalThis.window = originalWindow;
+    }
+  });
   check('quoted commas and escaped quotes', () => assert.deepEqual(parseDelimited('姓名,帳號,密碼,科別\n王老師,w,TestPass123456,"英文,雙語"\n李老師,l,TestPass123456,"科別""A"'), [['姓名','帳號','密碼','科別'],['王老師','w','TestPass123456','英文,雙語'],['李老師','l','TestPass123456','科別"A']]));
   check('quoted multiline CSV and tabs', () => { assert.deepEqual(parseDelimited('a,b,"c\nd"'), [['a','b','c\nd']]); assert.deepEqual(parseDelimited('a\tb\tc'), [['a','b','c']]); });
   check('malformed quote rejected, not silently skipped', () => { assert.throws(() => parseDelimited('a,b,"c')); assert.throws(() => parseDelimited('a,b,"c"broken')); });

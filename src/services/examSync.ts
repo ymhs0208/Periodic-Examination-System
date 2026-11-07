@@ -8,6 +8,7 @@ import type {
   CorrectionDraft,
   CorrectionProposal,
   ExamConfig,
+  ExamAttendance,
   ExamPeriod,
   ExamSession,
   AdminAccounts
@@ -267,7 +268,7 @@ class ExamSyncService {
     presentCount: number;
     absentCount: number;
     absentStudents: { seatNo: number; name: string; reason: string }[];
-  }): Promise<ClassroomExamState> {
+  }): Promise<ExamAttendance> {
     const res = await this.request('/api/exam/attendance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

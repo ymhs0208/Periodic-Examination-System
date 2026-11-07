@@ -48,16 +48,55 @@ test('isolated Worker: REST/WS privacy, auth, audit, headers, recent verificatio
     const teacherLogin=await request('/api/auth/login','POST',{role:'invigilator',username:'local-test-teacher',password:teacherPassword});
     assert.equal(teacherLogin.res.status,200);const teacherCookie=teacherLogin.res.headers.get('Set-Cookie').split(';')[0];
     assert.equal((await request('/api/auth/admins','GET',undefined,teacherCookie)).res.status,403);
-    const attendance={classId:'test-room',expectedLastUpdated:null,expectedCount:30,presentCount:29,absentCount:1,absentStudents:[{seatNo:1,name:'測試學生',reason:'病假'}]};
+    const privateReason='病假：隔離測試私人原因';
+    const attendance={classId:'test-room',expectedLastUpdated:null,expectedCount:30,presentCount:29,absentCount:1,absentStudents:[{seatNo:1,name:'測試學生',reason:privateReason}]};
     const anon=await wsSnapshot(); const teacher=await wsSnapshot(teacherCookie);
     const nextEvent=(ws)=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('update timeout')),5000);ws.addEventListener('message',e=>{clearTimeout(timer);resolve(JSON.parse(e.data));},{once:true});});
     const anonUpdate=nextEvent(anon.ws);const teacherUpdate=nextEvent(teacher.ws);
     assert.equal((await adminRequest('/api/exam/attendance','POST',attendance)).res.status,200);
     const anonPayload=(await anonUpdate).payload;const teacherPayload=(await teacherUpdate).payload;
-    assert.equal(anonPayload.absentStudents[0].name,'');assert.equal(anonPayload.absentStudents[0].reason,'');assert.equal(teacherPayload.absentStudents[0].reason,'病假');
+    assert.equal(anonPayload.absentStudents[0].name,'');assert.equal(anonPayload.absentStudents[0].reason,'');assert.equal(teacherPayload.absentStudents[0].reason,privateReason);
     const publicState=(await request('/api/exam/state')).data.data;
     assert.equal(publicState.classrooms[0].absentStudents[0].reason,'');assert.equal(publicState.classrooms[0].absentStudents[0].name,'');
-    assert.equal((await request('/api/exam/state','GET',undefined,teacherCookie)).data.data.classrooms[0].absentStudents[0].reason,'病假');
+    assert.equal((await request('/api/exam/state','GET',undefined,teacherCookie)).data.data.classrooms[0].absentStudents[0].reason,privateReason);
+
+    const periods=[
+      {id:'first',date:'2026-11-07',startTime:'09:00',endTime:'10:00',subject:'數學',grades:[]},
+      {id:'second',date:'2026-11-07',startTime:'10:10',endTime:'11:10',subject:'國文',grades:[]}
+    ];
+    assert.equal((await adminRequest('/api/exam/periods','PATCH',{expectedPeriods:[],periods})).res.status,200);
+    assert.equal((await adminRequest('/api/exam/period-invigilators','PATCH',{
+      classId:'test-room',periodId:'second',teacherId:null,expectedTeacherId:teacherId
+    })).res.status,200);
+    const otherPeriodUpdate=nextEvent(anon.ws);
+    assert.equal((await adminRequest('/api/exam/attendance','POST',{...attendance,periodId:'second'})).res.status,200);
+    const otherPeriodEvent=await otherPeriodUpdate;
+    assert.equal(otherPeriodEvent.event,'PERIOD_ATTENDANCE_UPDATED');
+    assert.deepEqual(otherPeriodEvent.payload.attendance.absentStudents,[{seatNo:1,name:'',reason:''}]);
+    assert.deepEqual((await wsSnapshot()).data.payload.classrooms[0].periodAttendance.second.absentStudents,[{seatNo:1,name:'',reason:''}]);
+    assert.deepEqual((await request('/api/exam/state')).data.data.classrooms[0].periodAttendance.second.absentStudents,[{seatNo:1,name:'',reason:''}]);
+    const firstAttendance={...attendance,periodId:'first',absentStudents:[{seatNo:2,name:'本節測試學生',reason:'病假'}]};
+    assert.equal((await request('/api/exam/attendance','POST',{...attendance,periodId:'second'},teacherCookie)).res.status,403);
+    const forged=await request('/api/exam/attendance','POST',{
+      ...firstAttendance,expectedCount:1,presentCount:1,absentCount:0,absentStudents:[]
+    },teacherCookie);
+    assert.equal(forged.res.status,409);
+    assert.equal((await request('/api/exam/state')).data.data.classrooms[0].periodAttendance.first,undefined);
+    const firstPeriodUpdate=nextEvent(anon.ws);
+    const saved=await request('/api/exam/attendance','POST',firstAttendance,teacherCookie);
+    assert.equal(saved.res.status,200);
+    assert.deepEqual(saved.data.data.absentStudents,firstAttendance.absentStudents);
+    assert.equal(saved.data.data.periodAttendance,undefined);
+    assert.ok(!JSON.stringify(saved.data).includes(privateReason));
+    assert.deepEqual((await firstPeriodUpdate).payload.attendance.absentStudents,[{seatNo:2,name:'',reason:'病假'}]);
+    assert.equal((await request('/api/exam/state')).data.data.classrooms[0].periodAttendance.first.expectedCount,30);
+    assert.equal((await adminRequest('/api/exam/classroom/test-room','PATCH',{expectedCount:31})).res.status,200);
+    const retry={...firstAttendance,expectedLastUpdated:saved.data.data.lastUpdated};
+    assert.equal((await request('/api/exam/attendance','POST',retry,teacherCookie)).res.status,409);
+    const updated=await request('/api/exam/attendance','POST',{...retry,expectedCount:31,presentCount:30},teacherCookie);
+    assert.equal(updated.res.status,200);
+    assert.equal(updated.data.data.expectedCount,31);
+
     await wait(1200);
     assert.equal((await request('/api/auth/admins','POST',{username:'local-second-admin',password:crypto.randomUUID()},adminCookie)).res.status,428);
     assert.equal((await request('/api/auth/reauth','POST',{password:crypto.randomUUID()},adminCookie)).res.status,401);

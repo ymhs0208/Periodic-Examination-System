@@ -27,6 +27,7 @@ import { SecurityReauth } from './components/auth/SecurityReauth';
 import { LoginPage } from './components/auth/LoginPage';
 import { RequestActivity, SystemFeedback } from './components/SystemFeedback';
 import { examSync, type LiveConnection } from './services/examSync';
+import { discardOtherAttendanceDrafts } from './services/attendanceDrafts';
 import { createEmptyExamState, type ExamSession, type SystemData } from './types/exam';
 
 type BoardView = 'blackboard' | 'attendance';
@@ -181,12 +182,18 @@ export default function App() {
   const [logoutError, setLogoutError] = useState('');
   const isAdminAuthed = session?.role === 'admin';
   const isInvigilatorAuthed = session?.role === 'invigilator' || isAdminAuthed;
+  const accountId = isAdminAuthed ? session.adminId : session?.teacherId;
+  const attendanceDraftOwner = accountId ? `${session?.role}:${accountId}` : undefined;
   const invigilatorTab = requestedInvigilatorTab ?? (session?.role === 'invigilator' ? 'assignments' : 'attendance');
   const loggedInUsername = session?.username || '';
   const mainRef = useRef<HTMLElement>(null);
   const previousNavigation = useRef(currentPath);
 
   const [systemData, setSystemData] = useState<SystemData>(createEmptyExamState);
+
+  useEffect(() => {
+    if (sessionCheck === 'ready') discardOtherAttendanceDrafts(attendanceDraftOwner);
+  }, [attendanceDraftOwner, sessionCheck]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -498,6 +505,7 @@ export default function App() {
     setLogoutError('');
     try {
       await examSync.logout();
+      discardOtherAttendanceDrafts();
       setSession(null);
       setSystemData(createEmptyExamState());
       retryLoading();
@@ -701,8 +709,9 @@ export default function App() {
                           {correctionSubmission ?? <p className="wb-panel text-sm text-slate-700">此帳號尚未取得試題更正送審權限。</p>}
                         </>
                       ) : invigilatorClassroom && invigilatorTab !== 'assignments' ? (
-                        <ScheduledInvigilatorView key={invigilatorClassroom.classId}
+                        <ScheduledInvigilatorView key={JSON.stringify([session?.role, accountId ?? session?.username, invigilatorClassroom.classId])}
                           tab={invigilatorTab}
+                          attendanceDraftOwner={attendanceDraftOwner}
                           classroom={invigilatorClassroom}
                           config={systemData.config}
                           issues={systemData.issues}

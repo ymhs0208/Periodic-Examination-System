@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { WorkbenchHeader } from './WorkbenchHeader';
 import { examSync } from '../../services/examSync';
+import { attendanceDraftKey } from '../../services/attendanceDrafts';
 import { ABSENCE_REASONS } from '../../types/exam';
 import type { ClassroomExamState, ExamIssue, IssueType, ExamAnnouncement, AbsentStudent, ExamConfig, ExamPeriod } from '../../types/exam';
 import { activePeriod, classroomForPeriod, examPeriods, periodApplies, periodLabel } from '../../types/examSchedule';
@@ -34,6 +35,7 @@ interface InvigilatorViewProps {
   announcements: ExamAnnouncement[];
   classList: Pick<ClassroomExamState, 'classId' | 'className' | 'grade'>[];
   onSelectClass: (classId: string) => void;
+  attendanceDraftOwner?: string;
   initialPeriodId?: string;
   allowedPeriodIds?: string[];
 }
@@ -154,16 +156,19 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   period,
   periodControls,
   tab,
-  lockPeriod
+  lockPeriod,
+  attendanceDraftOwner
 }) => {
   const { confirmAction, confirmationDialog } = useActionConfirmation();
   const attendanceRecord = classroomForPeriod(classroom, period);
-  const draftKey = `exam-attendance-draft:${classroom.classId}:${period?.id ?? 'none'}`;
+  const draftKey = attendanceDraftOwner && period ? attendanceDraftKey(attendanceDraftOwner, classroom.classId, period.id) : undefined;
   const initialDraft = useRef<{ absentStudents: AbsentStudent[]; version: string | null } | null>(null);
   const draftLoaded = useRef(false);
   if (!draftLoaded.current) {
     draftLoaded.current = true;
-    try { initialDraft.current = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch { /* storage unavailable */ }
+    if (draftKey) {
+      try { initialDraft.current = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch { /* storage unavailable */ }
+    }
   }
   const [absentStudents, setAbsentStudents] = useState<AbsentStudent[]>(initialDraft.current?.absentStudents ?? attendanceRecord.absentStudents);
   const baseVersion = useRef<string | null>(initialDraft.current ? initialDraft.current.version : attendanceRecord.statusReported ? attendanceRecord.lastUpdated : null);
@@ -198,10 +203,14 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   useEffect(() => {
     const changed = JSON.stringify(absentStudents) !== JSON.stringify(baseStudents.current) || !!initialDraft.current;
     dirty.current = changed;
+    let canStoreDraft = Boolean(draftKey);
     try {
-      if (changed) sessionStorage.setItem(draftKey, JSON.stringify({ absentStudents, version: baseVersion.current }));
-      else sessionStorage.removeItem(draftKey);
-    } catch { if (changed) setDraftWarning('瀏覽器無法保留草稿，離開本頁前請先送出點名。'); }
+      if (draftKey) {
+        if (changed) sessionStorage.setItem(draftKey, JSON.stringify({ absentStudents, version: baseVersion.current }));
+        else sessionStorage.removeItem(draftKey);
+      }
+    } catch { canStoreDraft = false; }
+    if (changed && !canStoreDraft) setDraftWarning('這個分頁無法保留草稿，離開前請先送出點名。');
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', beforeUnload);
     return () => window.removeEventListener('beforeunload', beforeUnload);
@@ -215,10 +224,10 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     setAbsentStudents(attendanceRecord.absentStudents); setRemoteConflict(false);
     setAttendanceError('');
     setAttendanceSaved(false);
-    try { sessionStorage.removeItem(draftKey); } catch { /* no storage */ }
+    try { if (draftKey) sessionStorage.removeItem(draftKey); } catch { /* no storage */ }
   };
 
-  const expectedCount = attendanceRecord.expectedCount;
+  const expectedCount = classroom.expectedCount;
   const presentCount = Math.max(0, expectedCount - absentStudents.length);
   const absentCount = absentStudents.length;
   const classroomIssues = issues.filter((issue) => issue.classId === classroom.classId);
@@ -232,7 +241,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     }
     const newSeats = [...new Set(seatNos)].filter((seatNo) => !absentStudents.some((student) => student.seatNo === seatNo));
     if (!newSeats.length) return true;
-    if (absentStudents.length + newSeats.length > attendanceRecord.expectedCount) {
+    if (absentStudents.length + newSeats.length > expectedCount) {
       setSeatError('缺席人數不可超過應到人數。');
       return false;
     }
@@ -323,7 +332,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
       baseStudents.current = saved.absentStudents;
       initialDraft.current = null; dirty.current = false;
       setAbsentStudents(saved.absentStudents); setRemoteConflict(false);
-      try { sessionStorage.removeItem(draftKey); } catch { /* no storage */ }
+      try { if (draftKey) sessionStorage.removeItem(draftKey); } catch { /* no storage */ }
       setAttendanceSaved(true);
     } catch (error) {
       setAttendanceError(error instanceof Error ? error.message : '點名送出失敗，請稍後再試。');

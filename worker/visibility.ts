@@ -1,11 +1,12 @@
 import type { AbsentStudent, ClassroomExamState, ExamIssue, ExamSession, SystemData } from '../src/types/exam';
+import { publicAbsenceReason } from '../src/types/exam';
 import { examPeriods, LEGACY_PERIOD_ID } from '../src/types/examSchedule';
 import { announcementStatus } from '../src/types/announcements';
 import { adminState, type StoredExamState } from './passwords';
 
 export function publicAbsences(students: AbsentStudent[]) {
   return students.map(({ seatNo, reason }) => ({
-    seatNo, name: '', reason
+    seatNo, name: '', reason: publicAbsenceReason(reason)
   }));
 }
 

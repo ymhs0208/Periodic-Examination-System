@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { FilePenLine, Send } from 'lucide-react';
+import { CheckCircle2, FilePenLine, Inbox, Send, Undo2 } from 'lucide-react';
 import { examSync } from '../services/examSync';
 import type { CorrectionDraft, CorrectionProposal, ExamAuthorAssignment, SystemData } from '../types/exam';
 import { gradeLabel } from '../types/grades';
@@ -177,18 +177,23 @@ export function CorrectionReview({ proposals, audienceLabel }: {
   }
 
   return (
-    <section className={panel} aria-labelledby="correction-review-title">
+    <section className={`${panel} shadow-sm`} aria-labelledby="correction-review-title">
       {confirmationDialog}
-      <h3 id="correction-review-title" className="flex flex-wrap items-center gap-2 text-lg font-black text-slate-950">
-        <FilePenLine size={20} className="text-teal-800" aria-hidden="true" />試題更正審核
-        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-950">{pending.length} 筆待審</span>
-      </h3>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+        <div className="min-w-0">
+          <h3 id="correction-review-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
+            <FilePenLine size={20} className="shrink-0 text-teal-800" aria-hidden="true" />待審的試題更正
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">核對題號、內容與對象。核准後會立即發布。</p>
+        </div>
+        <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-950">{pending.length} 筆待審</span>
+      </div>
       {feedback && <p role={feedback.error ? 'alert' : 'status'} className={`mt-3 rounded-xl p-3 text-sm font-bold ${feedback.error ? 'bg-rose-50 text-rose-900' : 'bg-teal-50 text-teal-900'}`}>{feedback.text}</p>}
       {pending.length ? (
-        <ul className="mt-3 grid gap-3 xl:grid-cols-2">
+        <ul className="mt-4 grid gap-3 xl:grid-cols-2">
           {pending.map((item) => (
-            <li key={item.id} className="min-w-0 rounded-xl border border-slate-200 p-3.5">
-              <p className="mb-1 text-xs font-bold text-teal-900 [overflow-wrap:anywhere]">送審教師 · {item.teacherName}</p>
+            <li key={item.id} className="min-w-0 rounded-xl border border-slate-200 p-4">
+              <p className="mb-2 text-sm font-bold text-teal-900 [overflow-wrap:anywhere]">送審教師 · {item.teacherName}</p>
               <CorrectionDetails item={item} audience={audienceLabel(item.targetAudience)} />
               {rejectId === item.id ? (
                 <form className="mt-3 space-y-2" onSubmit={(e) => { e.preventDefault(); void review(item, 'rejected'); }}>
@@ -201,19 +206,23 @@ export function CorrectionReview({ proposals, audienceLabel }: {
                   </div>
                 </form>
               ) : (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button disabled={busy} type="button" className={primary} onClick={() => void review(item, 'approved')}>核對並核准</button>
-                  <button disabled={busy} type="button" className={secondary} onClick={() => { setRejectId(item.id); setReason(''); }}>退回</button>
+                <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                  <button disabled={busy} type="button" className={`${primary} inline-flex items-center gap-1.5`} onClick={() => void review(item, 'approved')}>
+                    <CheckCircle2 size={16} aria-hidden="true" />核對並核准
+                  </button>
+                  <button disabled={busy} type="button" className={`${secondary} inline-flex items-center gap-1.5`} onClick={() => { setRejectId(item.id); setReason(''); }}>
+                    <Undo2 size={16} aria-hidden="true" />退回
+                  </button>
                 </div>
               )}
             </li>
           ))}
         </ul>
-      ) : <p className="mt-3 text-sm text-slate-700">目前沒有待審的試題更正。</p>}
+      ) : <p className="mt-4 flex items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-700"><Inbox size={19} aria-hidden="true" />目前沒有待審的試題更正。</p>}
       {reviewed.length > 0 && (
-        <details className="mt-4 rounded-xl border border-slate-200 p-3">
-          <summary className="cursor-pointer text-sm font-bold text-slate-800">已審核紀錄（{reviewed.length} 筆）</summary>
-          <ul className="mt-3 max-h-96 space-y-2 overflow-y-auto">
+        <details className="mt-4 rounded-xl border border-slate-200 px-3">
+          <summary className="min-h-11 cursor-pointer py-3 text-sm font-bold text-slate-800">已審核紀錄（{reviewed.length} 筆）</summary>
+          <ul className="grid gap-3 pb-3 xl:grid-cols-2">
             {reviewed.map((item) => (
               <li key={item.id} className="rounded-xl border border-slate-200 p-3">
                 <p className="mb-1 text-xs font-bold text-teal-900 [overflow-wrap:anywhere]">送審教師 · {item.teacherName}</p>

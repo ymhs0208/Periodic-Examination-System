@@ -5,9 +5,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
   Building2,
+  CalendarClock,
   AlertTriangle,
   CheckCircle2,
   FileEdit,
+  FileCheck2,
+  Copy,
   Radio,
   Printer,
   Download,
@@ -56,6 +59,7 @@ import type {
   TeacherAccountInput,
   IssueStatus,
   AnnouncementType,
+  ExamAnnouncement,
   ExamConfig
 } from '../../types/exam';
 
@@ -86,6 +90,25 @@ const announcementTimeFormat = new Intl.DateTimeFormat('sv-SE', {
   dateStyle: 'short',
   timeStyle: 'short'
 });
+
+const broadcastPanels = [
+  { id: 'review', label: '試題更正審核', icon: FileCheck2 },
+  { id: 'compose', label: '撰寫公告', icon: FileEdit },
+  { id: 'history', label: '公告紀錄', icon: History }
+] as const;
+const announcementTypes = {
+  correction: { label: '試題更正', badge: 'bg-amber-100 text-amber-950' },
+  extension: { label: '時間延長', badge: 'bg-sky-100 text-sky-950' },
+  notice: { label: '一般提醒', badge: 'bg-teal-100 text-teal-950' },
+  emergency: { label: '緊急公告', badge: 'bg-rose-100 text-rose-950' }
+};
+const announcementStates = {
+  active: { label: '顯示中', badge: 'bg-emerald-100 text-emerald-950' },
+  scheduled: { label: '排程中', badge: 'bg-sky-100 text-sky-950' },
+  ended: { label: '已結束', badge: 'bg-slate-100 text-slate-700' }
+};
+const broadcastField = 'mt-1.5 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-950 sm:text-sm';
+const broadcastCard = 'min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6';
 
 function parseAnnouncementTime(value: string) {
   if (!value) return undefined;
@@ -145,6 +168,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [withdrawingId, setWithdrawingId] = useState<string>();
   const [withdrawFeedback, setWithdrawFeedback] = useState<{ error: boolean; text: string }>();
   const announcementNow = useAnnouncementClock(data.announcements, activeTab === 'broadcast');
+  const pendingCorrections = sourceData.correctionProposals?.filter((item) => item.status === 'pending').length ?? 0;
+  const [broadcastPanel, setBroadcastPanel] = useState<(typeof broadcastPanels)[number]['id']>(() => pendingCorrections ? 'review' : 'compose');
+  const [announcementFilter, setAnnouncementFilter] = useState<'all' | keyof typeof announcementStates>('all');
+  const announcementTitleRef = useRef<HTMLInputElement>(null);
+  const focusCopiedAnnouncement = useRef(false);
+  useEffect(() => {
+    if (activeTab === 'broadcast' && broadcastPanel === 'compose' && focusCopiedAnnouncement.current) {
+      focusCopiedAnnouncement.current = false;
+      announcementTitleRef.current?.focus();
+    }
+  }, [activeTab, broadcastPanel]);
 
   // Issues Handling State
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(
@@ -528,9 +562,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
       title: '確認發布考務公告',
       description: '考科從考程表科目選擇，不因此限制接收對象；時間延長僅發布通知，不會修改考程。需延後結束時間時，請至考務設定 → 考程調整。',
       facts: [
-        { label: '發布對象', value: `${getTargetAudienceLabel(announcement.targetAudience)}（${sourceData.classrooms.filter((room) => announcement.targetAudience === 'all' || announcement.targetAudience === room.classId || announcement.targetAudience === `grade_${room.grade}`).map((room) => room.className).join('、') || '無符合班級'}）` },
+        { label: '發布對象', value: `${getTargetAudienceLabel(announcement.targetAudience)}（${announcementRooms(announcement.targetAudience).map((room) => room.className).join('、') || '無符合班級'}）` },
         { label: '考科', value: announcement.subject || '未指定' },
-        { label: '公告類型', value: { correction: '試題更正', extension: '時間延長', notice: '一般提醒', emergency: '緊急公告' }[announcement.type] },
+        { label: '公告類型', value: announcementTypes[announcement.type].label },
         { label: '公告標題', value: announcement.title },
         { label: '公告內容', value: announcement.content },
         { label: '開始顯示（台灣時間）', value: startsAt ? announcementTimeFormat.format(new Date(startsAt)) : '發布後立即顯示' },
@@ -558,7 +592,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       description: '撤回後將不再顯示於接收端。若內容有誤，可先複製為新公告修正，再撤回舊公告。',
       facts: [
         { label: '公告標題', value: announcement.title },
-        { label: '發布對象', value: `${getTargetAudienceLabel(announcement.targetAudience)}（${sourceData.classrooms.filter((room) => announcement.targetAudience === 'all' || announcement.targetAudience === room.classId || announcement.targetAudience === `grade_${room.grade}`).map((room) => room.className).join('、') || '無符合班級'}）` }
+        { label: '發布對象', value: `${getTargetAudienceLabel(announcement.targetAudience)}（${announcementRooms(announcement.targetAudience).map((room) => room.className).join('、') || '無符合班級'}）` }
       ],
       confirmLabel: '確認撤回',
       danger: true
@@ -573,6 +607,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
     } finally {
       setWithdrawingId(undefined);
     }
+  };
+
+  const copyAnnouncement = (announcement: ExamAnnouncement) => {
+    setAnnoTitle(announcement.title);
+    setAnnoContent(announcement.content);
+    setAnnoSubject(announcement.subject);
+    setAnnoType(Object.hasOwn(announcementTypes, announcement.type) ? announcement.type : 'notice');
+    setTargetAudience(announcement.targetAudience);
+    setAnnoStartsAt('');
+    setAnnoEndsAt('');
+    setPublishSuccess(false);
+    setPublishError('');
+    focusCopiedAnnouncement.current = true;
+    setBroadcastPanel('compose');
   };
 
   // Reply to Issue with quick action buttons
@@ -639,6 +687,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
     const cls = sourceData.classrooms.find((c) => c.classId === target);
     return cls ? `${cls.classId} ${cls.className}` : target;
   };
+  const announcementRooms = (target: string) => sourceData.classrooms.filter((room) =>
+    target === 'all' || target === room.classId || target === `grade_${room.grade}`);
 
   const getIssueCategoryLabel = (cat: string) => {
     switch (cat) {
@@ -1128,7 +1178,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const sections = [
     { id: 'matrix', label: '考場看板', icon: LayoutGrid, count: totalClassrooms, description: '查看各班點名進度與考場狀況。' },
-    { id: 'broadcast', label: '公告與更正', icon: Radio, count: data.correctionProposals?.filter((item) => item.status === 'pending').length || 0, description: '審核試題更正，或撰寫並發布考務公告。' },
+    { id: 'broadcast', label: '公告與更正', icon: Radio, count: pendingCorrections, description: '審核試題更正，或撰寫並發布考務公告。' },
     { id: 'issues', label: '考場通報', icon: AlertTriangle, count: pendingIssuesCount, description: '查看待處理的考場狀況及教務回覆。' },
     { id: 'teachers', label: '教師帳號', icon: UserPlus, count: teachersList.length, description: '匯入教師名冊、管理個別登入帳號。' },
     { id: 'assign', label: '監考指派', icon: UserCheck, description: '依年級查看考場並安排監考老師。' },
@@ -1175,9 +1225,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
       </div>
     );
   }
-  const announcementScheduleFields = (
+  const announcementScheduleFields = (numbered = false) => (
     <fieldset className="min-w-0 space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 pb-3">
-      <legend className="px-1 text-sm font-black text-slate-900">顯示時段（台灣時間）</legend>
+      <legend className="px-1 text-sm font-black text-slate-900">{numbered && '3　'}顯示時段（台灣時間）</legend>
       <p id="admin-anno-schedule-help" className="text-xs text-slate-700">開始留空會立即顯示，結束留空會顯示至手動撤回。</p>
       <div className="grid min-w-0 gap-2 sm:grid-cols-2">
         <label className="min-w-0 text-xs font-bold text-slate-800">
@@ -1200,11 +1250,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
   ) : publishSuccess ? (
     <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-800">公告已儲存，將依設定時段顯示。</p>
   ) : null;
+  const filteredAnnouncements = activeTab === 'broadcast' ? data.announcements.filter((announcement) =>
+    announcementFilter === 'all' || announcementStatus(announcement, announcementNow) === announcementFilter) : [];
 
   return (
     <div className={`print-report-root ${activeTab === 'reports' ? 'official-report-layout' : ''} flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm ${isEmbedded ? 'xl:h-[820px] xl:overflow-y-auto' : ''}`}>
       {confirmationDialog}
-      <section className="attendance-banner no-print relative isolate overflow-hidden px-4 py-5 text-white sm:px-7 sm:py-7">
+      <section className={`attendance-banner no-print relative isolate overflow-hidden px-4 text-white sm:px-7 ${activeTab === 'broadcast' ? 'py-4' : 'py-5 sm:py-7'}`}>
         <div className="attendance-banner-pattern pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3" aria-hidden="true" />
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
@@ -1230,7 +1282,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       </section>
 
-      <nav aria-label="教務功能" className="no-print grid grid-cols-2 gap-2 border-b border-slate-200 bg-white p-3 sm:grid-cols-4 sm:px-6 xl:grid-cols-7">
+      <nav aria-label="教務功能" className={`no-print grid grid-cols-2 gap-2 border-b border-slate-200 bg-white p-3 sm:grid-cols-4 sm:px-6 ${activeTab === 'broadcast' ? 'xl:grid-cols-8' : 'xl:grid-cols-7'}`}>
         {sections.filter((section) => !isEmbedded || section.id !== 'reports').map((section) => {
           const Icon = section.icon;
           return (
@@ -1251,7 +1303,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       </nav>
 
       <div className="min-w-0 flex-1 bg-slate-50 p-3 sm:p-6 lg:p-7 xl:overflow-y-auto">
-        <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div hidden={activeTab === 'broadcast'} className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-teal-200 bg-teal-50 text-teal-800"><CurrentIcon size={19} aria-hidden="true" /></span>
             <div>
@@ -1620,7 +1672,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   />
                 </div>
                 <p className="text-xs font-bold text-amber-900">考科請從考程表科目選擇，不會因此限制接收班級。「時間延長」僅發布通知，考程時間不變；若需延後，請至考務設定 → 考程調整。</p>
-                {announcementScheduleFields}
+                {announcementScheduleFields()}
                 <button
                   type="submit"
                   disabled={isPublishing || !annoTitle.trim() || !annoContent.trim()}
@@ -1637,162 +1689,165 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
         {/* TAB 2: 試題更正 / 公告發布 */}
         {activeTab === 'broadcast' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-7">
-            <div className="min-w-0 lg:col-span-12">
+          <div className="space-y-4 sm:space-y-5">
+            <header className="rounded-2xl border border-teal-200 bg-linear-to-br from-white via-teal-50 to-sky-50 p-4 sm:p-6">
+              <p className="flex items-center gap-2 text-sm font-bold text-teal-800"><Radio size={17} aria-hidden="true" />考務發布</p>
+              <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">公告與更正</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-700">集中審核教師送來的更正、發布新公告，並查看各則公告的顯示時段。</p>
+              <nav aria-label="公告與更正功能" className="mt-4 grid gap-2 sm:grid-cols-3">
+                {broadcastPanels.map(({ id, label, icon: Icon }) => (
+                  <button key={id} type="button" aria-pressed={broadcastPanel === id} aria-controls={'broadcast-' + id}
+                    onClick={() => setBroadcastPanel(id)}
+                    className="flex min-h-14 min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm font-bold text-slate-800 hover:border-teal-400 hover:bg-teal-50 aria-pressed:border-teal-700 aria-pressed:bg-teal-100 aria-pressed:text-teal-950">
+                    <Icon size={19} className="shrink-0 text-teal-800" aria-hidden="true" />
+                    <span>{label}</span>
+                    {id === 'review' && pendingCorrections > 0 && <span className="ml-auto shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-950">{pendingCorrections} 筆待審</span>}
+                    {id === 'history' && <span className="ml-auto shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">{data.announcements.length} 則</span>}
+                  </button>
+                ))}
+              </nav>
+            </header>
+
+            <div id="broadcast-review" hidden={broadcastPanel !== 'review'}>
               <CorrectionReview proposals={data.correctionProposals ?? []} audienceLabel={getTargetAudienceLabel} />
             </div>
-            <div className="lg:col-span-7 bg-white rounded-2xl sm:rounded-3xl border border-slate-200 p-4 sm:p-6 shadow-sm space-y-4 sm:space-y-5">
-              <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2">
-                  <FileEdit className="w-5 h-5 text-teal-800" />
-                  <span>修改題目 / 廣播公告</span>
-                </h3>
-                <span className="text-xs text-slate-600 font-medium block mt-0.5">
-                  可立即發布，也可設定所選考場的公告顯示時段。
-                </span>
-              </div>
 
-              {/* 發布表單 (自適應手機單欄、平板桌機三欄) */}
-              <form onSubmit={handlePublishAnnouncement} className="space-y-4 pt-1">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label htmlFor="admin-target-audience" className="block text-xs font-black text-slate-700 mb-1">對象班級</label>
-                    <select id="admin-target-audience"
-                      value={targetAudience}
-                      onChange={(e) => setTargetAudience(e.target.value)}
-                      className="w-full min-h-[42px] text-xs font-black p-2.5 rounded-xl border border-slate-300 bg-white"
-                    >
-                      <option value="all">全部班級 (全校)</option>
-                      {grades.map((grade) => (
-                        <option key={grade} value={`grade_${grade}`}>{gradeName(grade)}全體</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="admin-anno-subject" className="block text-xs font-black text-slate-700 mb-1">考科</label>
-                    <select id="admin-anno-subject"
-                      value={annoSubject}
-                      onChange={(e) => setAnnoSubject(e.target.value)}
-                      className="w-full min-h-[42px] text-xs font-black p-2.5 rounded-xl border border-slate-300 bg-white"
-                    >
-                      <option value="">{examSubjects.length ? '選擇考程表科目' : '考程表尚無科目'}</option>
-                      {annoSubject && !examSubjects.includes(annoSubject) && (
-                        <option value={annoSubject}>{annoSubject}（目前考程未列）</option>
-                      )}
-                      {examSubjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
-                    </select>
-                    {!examSubjects.length && <p className="mt-1 text-xs font-bold text-slate-600">請先到「考務設定 → 考程表」新增考試節次。</p>}
-                  </div>
-                  <div>
-                    <label htmlFor="admin-anno-type" className="block text-xs font-black text-slate-700 mb-1">類型</label>
-                    <select id="admin-anno-type"
-                      value={annoType}
-                      onChange={(e) => setAnnoType(e.target.value as any)}
-                      className="w-full min-h-[42px] text-xs font-black p-2.5 rounded-xl border border-slate-300 bg-white"
-                    >
-                      <option value="correction">試題更正 (黃金高亮)</option>
-                      <option value="extension">時間延長</option>
-                      <option value="notice">一般提醒</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="admin-anno-title" className="block text-xs font-black text-slate-700 mb-1">公告標題</label>
-                  <input id="admin-anno-title"
-                    type="text"
-                    value={annoTitle}
-                    onChange={(e) => setAnnoTitle(e.target.value)}
-                    placeholder="請輸入公告或試題更正標題..."
-                    className="w-full text-sm font-black p-3 rounded-xl border border-slate-300 bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="admin-anno-content" className="block text-xs font-black text-slate-700 mb-1">
-                    更正內容（會用超大字顯示在各班黑板上）：
-                  </label>
-                  <textarea id="admin-anno-content"
-                    rows={3}
-                    value={annoContent}
-                    onChange={(e) => setAnnoContent(e.target.value)}
-                    placeholder="請輸入詳細試題更正說明或考務公告內容..."
-                    className="w-full text-sm font-bold p-3.5 rounded-xl border border-slate-300 bg-white leading-relaxed"
-                  />
-                </div>
-
-                <p className="text-xs font-bold text-amber-900">考科請從考程表科目選擇，不會因此限制接收班級。「時間延長」僅發布通知，考程時間不變；若需延後，請至考務設定 → 考程調整。</p>
-                {announcementScheduleFields}
-                <button
-                  type="submit"
-                  disabled={isPublishing || !annoTitle.trim() || !annoContent.trim()}
-                  className="w-full min-h-[52px] py-3.5 sm:py-4 px-5 bg-teal-800 hover:bg-teal-900 active:scale-[0.99] text-white font-black text-sm sm:text-lg rounded-2xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Send className="w-5 h-5 shrink-0" />
-                  <span>{isPublishing ? '正在發布公告…' : '預覽並發布公告'}</span>
-                </button>
-
-                {announcementFeedback}
-              </form>
-            </div>
-
-            {/* 已發布歷史列表 */}
-            <div className="lg:col-span-5 bg-white rounded-2xl sm:rounded-3xl border-2 border-slate-200 p-4 sm:p-6 shadow-sm space-y-4 flex flex-col">
-              <h4 className="text-sm sm:text-base font-black text-slate-900 border-b border-slate-100 pb-3">
-                公告與更正紀錄 ({data.announcements.length})
-              </h4>
-              {withdrawFeedback && <p role={withdrawFeedback.error ? 'alert' : 'status'}
-                className={`rounded-xl p-3 text-sm font-bold ${withdrawFeedback.error ? 'bg-rose-50 text-rose-900' : 'bg-teal-50 text-teal-900'}`}>{withdrawFeedback.text}</p>}
-              <div className="flex-1 space-y-3 overflow-y-auto max-h-[520px] pr-1">
-                {data.announcements.length > 0 ? (
-                  data.announcements.map((anno) => (
-                    <div
-                      key={anno.id}
-                      className="p-4 rounded-2xl border-2 border-amber-300 bg-amber-50/70 space-y-2 text-xs"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-black text-amber-900">
-                          {anno.type === 'correction' ? '試題更正' : '考務公告'} · {anno.subject}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteAnnouncement(anno.id)}
-                          disabled={Boolean(withdrawingId)}
-                          className="text-rose-700 hover:text-rose-800 font-black flex items-center gap-1 cursor-pointer min-h-[32px] px-2 disabled:opacity-50"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>{withdrawingId === anno.id ? '撤回中…' : '撤回公告'}</span>
-                        </button>
+            <div id="broadcast-compose" hidden={broadcastPanel !== 'compose'}>
+              <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+                <section aria-labelledby="broadcast-compose-title" className={broadcastCard}>
+                  <h3 id="broadcast-compose-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
+                    <FileEdit size={20} className="shrink-0 text-teal-800" aria-hidden="true" />撰寫新公告
+                  </h3>
+                  <form onSubmit={handlePublishAnnouncement} className="mt-4 space-y-5">
+                    <fieldset className="min-w-0">
+                      <legend className="mb-2 text-sm font-black text-teal-900">1　設定發布對象與類型</legend>
+                      <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        <label className="min-w-0 text-sm font-bold text-slate-800">發布對象
+                          <select id="admin-target-audience" value={targetAudience} onChange={(event) => setTargetAudience(event.target.value)} className={broadcastField}>
+                            <option value="all">全校所有考場</option>
+                            {targetAudience !== 'all' && !grades.some((grade) => targetAudience === 'grade_' + grade) && (
+                              <option value={targetAudience}>{getTargetAudienceLabel(targetAudience)}</option>
+                            )}
+                            {grades.map((grade) => <option key={grade} value={'grade_' + grade}>{gradeName(grade)}全體考場</option>)}
+                          </select>
+                        </label>
+                        <label className="min-w-0 text-sm font-bold text-slate-800">公告類型
+                          <select id="admin-anno-type" value={annoType} onChange={(event) => setAnnoType(event.target.value as AnnouncementType)} className={broadcastField}>
+                            <option value="correction">試題更正</option>
+                            <option value="extension">時間延長</option>
+                            <option value="notice">一般提醒</option>
+                            {annoType === 'emergency' && <option value="emergency">緊急公告</option>}
+                          </select>
+                        </label>
+                        <label className="min-w-0 text-sm font-bold text-slate-800">考科
+                          <select id="admin-anno-subject" value={annoSubject} onChange={(event) => setAnnoSubject(event.target.value)} className={broadcastField}>
+                            <option value="">{examSubjects.length ? '選擇考程表科目' : '考程表尚無科目'}</option>
+                            {annoSubject && !examSubjects.includes(annoSubject) && <option value={annoSubject}>{annoSubject}（目前考程未列）</option>}
+                            {examSubjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
+                          </select>
+                          <span className="mt-1.5 block text-xs font-normal text-slate-600">
+                            {examSubjects.length ? '接收班級由「發布對象」決定。' : '可至考務設定新增考試節次。'}
+                          </span>
+                        </label>
                       </div>
-                      <div className="font-black text-slate-900 text-sm">{anno.title}</div>
-                      <p className="font-bold">對象：{getTargetAudienceLabel(anno.targetAudience)} · {sourceData.classrooms.filter((room) => anno.targetAudience === 'all' || anno.targetAudience === room.classId || anno.targetAudience === `grade_${room.grade}`).length} 班</p>
-                      <button type="button" className="underline" onClick={() => { setAnnoTitle(anno.title); setAnnoContent(anno.content); setAnnoSubject(anno.subject); setAnnoType(anno.type); setTargetAudience(anno.targetAudience); setAnnoStartsAt(''); setAnnoEndsAt(''); setPublishSuccess(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>複製為新公告（修正後重新發布）</button>
-                      <dl className="space-y-1 text-slate-700">
-                        <div className="flex flex-wrap gap-x-2">
-                          <dt className="font-bold">狀態</dt>
-                          <dd>{{ scheduled: '排程中', active: '顯示中', ended: '已結束' }[announcementStatus(anno, announcementNow)]}</dd>
-                        </div>
-                        <div className="flex flex-wrap gap-x-2">
-                          <dt className="font-bold">開始顯示</dt>
-                          <dd>{announcementTimeFormat.format(new Date(announcementDisplayStart(anno)))}</dd>
-                        </div>
-                        <div className="flex flex-wrap gap-x-2">
-                          <dt className="font-bold">結束顯示</dt>
-                          <dd>{anno.endsAt ? announcementTimeFormat.format(new Date(anno.endsAt)) : '手動撤回'}</dd>
-                        </div>
-                      </dl>
-                      <div className="bg-white p-3 rounded-xl border border-amber-200 text-slate-800 font-bold leading-relaxed">
-                        {anno.content}
-                      </div>
+                    </fieldset>
+                    <fieldset className="min-w-0 space-y-3 border-t border-slate-200 pt-3">
+                      <legend className="pr-2 text-sm font-black text-teal-900">2　填寫公告內容</legend>
+                      <label className="block text-sm font-bold text-slate-800">公告標題
+                        <input id="admin-anno-title" ref={announcementTitleRef} required maxLength={150} value={annoTitle}
+                          onChange={(event) => setAnnoTitle(event.target.value)} placeholder="例如 第 5 題選項更正" className={broadcastField} />
+                      </label>
+                      <label className="block text-sm font-bold text-slate-800">公告內容
+                        <textarea id="admin-anno-content" required rows={5} maxLength={3000} value={annoContent}
+                          onChange={(event) => setAnnoContent(event.target.value)} placeholder="填寫要顯示在教室黑板上的文字" className={broadcastField + ' leading-6'} />
+                      </label>
+                    </fieldset>
+                    {announcementScheduleFields(true)}
+                    <button type="submit" disabled={isPublishing || !annoTitle.trim() || !annoContent.trim()}
+                      className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-teal-800 px-4 py-2 text-sm font-black text-white hover:bg-teal-900 disabled:opacity-50">
+                      <Send size={18} aria-hidden="true" />{isPublishing ? '正在發布公告…' : '預覽並發布公告'}
+                    </button>
+                    {announcementFeedback}
+                  </form>
+                </section>
+
+                <aside aria-labelledby="broadcast-summary-title" className={broadcastCard}>
+                  <h3 id="broadcast-summary-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
+                    <CalendarClock size={20} className="shrink-0 text-teal-800" aria-hidden="true" />發布摘要
+                  </h3>
+                  <dl className="mt-3 space-y-3 text-sm text-slate-700">
+                    <div className="rounded-xl border border-teal-100 bg-teal-50 p-3">
+                      <dt className="text-xs font-bold text-teal-800">發布對象</dt>
+                      <dd className="mt-1 font-black text-teal-950 [overflow-wrap:anywhere]">{getTargetAudienceLabel(targetAudience)} · {announcementRooms(targetAudience).length} 班</dd>
                     </div>
-                  ))
-                ) : (
-                  <div className="text-center py-12 text-xs sm:text-sm text-slate-600 font-bold bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                    目前尚無發布任何試題更正或公告
-                  </div>
-                )}
+                    <div>
+                      <dt className="text-xs font-bold">公告類型</dt>
+                      <dd className="mt-1 font-bold text-slate-950">{announcementTypes[annoType].label}</dd>
+                    </div>
+                    <div className="border-t border-slate-100 pt-3">
+                      <dt className="text-xs font-bold">顯示時段（台灣時間）</dt>
+                      <dd className="mt-1 font-bold text-slate-950 [overflow-wrap:anywhere]">{annoStartsAt ? annoStartsAt.replace('T', ' ') : '發布後立即顯示'}</dd>
+                      <dd className="mt-0.5 [overflow-wrap:anywhere]">{annoEndsAt ? '結束於 ' + annoEndsAt.replace('T', ' ') : '持續至手動撤回'}</dd>
+                    </div>
+                  </dl>
+                  {annoType === 'extension' && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">此處會發布延長通知。要調整考試結束時間，請到考務設定的考程表。</p>}
+                </aside>
               </div>
             </div>
+
+            <section id="broadcast-history" hidden={broadcastPanel !== 'history'} aria-labelledby="broadcast-history-title" className={broadcastCard}>
+              <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-4">
+                <div>
+                  <h3 id="broadcast-history-title" className="flex items-center gap-2 text-lg font-black text-slate-950"><History size={20} className="text-teal-800" aria-hidden="true" />公告紀錄</h3>
+                  <p className="mt-1 text-sm text-slate-600">查看顯示狀態，或複製舊公告來撰寫新版。</p>
+                </div>
+                <label className="min-w-0 text-sm font-bold text-slate-800">顯示狀態
+                  <select value={announcementFilter} onChange={(event) => setAnnouncementFilter(event.target.value as typeof announcementFilter)} className={broadcastField}>
+                    <option value="all">全部狀態</option>
+                    {Object.entries(announcementStates).map(([state, { label }]) => <option key={state} value={state}>{label}</option>)}
+                  </select>
+                </label>
+              </div>
+              {withdrawFeedback && <p role={withdrawFeedback.error ? 'alert' : 'status'}
+                className={'mt-4 rounded-xl p-3 text-sm font-bold ' + (withdrawFeedback.error ? 'bg-rose-50 text-rose-900' : 'bg-teal-50 text-teal-900')}>{withdrawFeedback.text}</p>}
+              {filteredAnnouncements.length ? (
+                <ul className="mt-4 grid min-w-0 gap-3 xl:grid-cols-2">
+                  {filteredAnnouncements.map((anno) => {
+                    const state = announcementStates[announcementStatus(anno, announcementNow)];
+                    const type = announcementTypes[anno.type] ?? announcementTypes.notice;
+                    return (
+                      <li key={anno.id} className="flex min-w-0 flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                          <span className={'rounded-full px-2.5 py-1 ' + type.badge}>{type.label}</span>
+                          <span className={'rounded-full px-2.5 py-1 ' + state.badge}>{state.label}</span>
+                        </div>
+                        <div>
+                          <h4 className="text-base font-black text-slate-950 [overflow-wrap:anywhere]">{anno.title}</h4>
+                          <p className="mt-1 text-sm leading-6 text-slate-700 [overflow-wrap:anywhere]">{getTargetAudienceLabel(anno.targetAudience)} · {announcementRooms(anno.targetAudience).length} 班{anno.subject ? ' · ' + anno.subject : ''}</p>
+                        </div>
+                        <p className="whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-800 [overflow-wrap:anywhere]">{anno.content}</p>
+                        <dl className="grid gap-x-4 gap-y-2 text-xs text-slate-700 min-[450px]:grid-cols-2">
+                          <div><dt className="font-bold">開始顯示</dt><dd className="mt-0.5">{announcementTimeFormat.format(new Date(announcementDisplayStart(anno)))}</dd></div>
+                          <div><dt className="font-bold">結束顯示</dt><dd className="mt-0.5">{anno.endsAt ? announcementTimeFormat.format(new Date(anno.endsAt)) : '手動撤回'}</dd></div>
+                        </dl>
+                        <div className="mt-auto flex flex-wrap gap-2 border-t border-slate-200 pt-2">
+                          <button type="button" onClick={() => copyAnnouncement(anno)} disabled={isPublishing}
+                            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-3 text-sm font-bold text-teal-900 hover:bg-teal-50 disabled:opacity-50">
+                            <Copy size={15} aria-hidden="true" />複製為新公告
+                          </button>
+                          <button type="button" onClick={() => void handleDeleteAnnouncement(anno.id)} disabled={Boolean(withdrawingId)}
+                            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-bold text-rose-800 hover:bg-rose-50 disabled:opacity-50">
+                            <Trash2 size={15} aria-hidden="true" />{withdrawingId === anno.id ? '撤回中…' : '撤回公告'}
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : <p className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-700">
+                {announcementFilter === 'all' ? '目前沒有公告紀錄。' : '這個狀態目前沒有公告。'}
+              </p>}
+            </section>
           </div>
         )}
 

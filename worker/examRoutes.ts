@@ -360,6 +360,9 @@ api.post('/api/exam/attendance', (c) => {
     new Set(absentStudents.map((student) => student.seatNo)).size !== absentCount) {
     return c.json({ success: false, error: '出缺席人數或座號資料有誤' }, 400);
   }
+  if (expectedCount !== classroom.expectedCount) {
+    return c.json({ success: false, error: `考場應到人數為 ${classroom.expectedCount} 人，請重新載入並核對後再送出點名。` }, 409);
+  }
 
   const currentRecord = period && state.config.periods !== undefined ? classroom.periodAttendance?.[period.id] : classroom;
   const currentVersion = currentRecord?.statusReported ? currentRecord.lastUpdated : null;
@@ -367,22 +370,18 @@ api.post('/api/exam/attendance', (c) => {
     return c.json({ success: false, error: '此班本節點名已由其他人更新，請保留草稿並重新載入核對後再送出。' }, 409);
   }
   const attendance: ExamAttendance = {
-    expectedCount, presentCount, absentCount,
+    expectedCount: classroom.expectedCount, presentCount, absentCount,
     absentStudents: absentStudents.map(({ seatNo, name, reason }) => ({ seatNo, name, reason })),
     statusReported: true,
     lastUpdated: new Date(Math.max(Date.now(), Date.parse(currentVersion || '') + 1 || 0)).toISOString()
   };
   if (period && state.config.periods !== undefined) {
     broadcast('PERIOD_ATTENDANCE_UPDATED', { classId, periodId: period.id, attendance });
-    const { periodInvigilators: _assignmentIds, invigilatorUsername: _defaultUsername, ...publicRoom } = classroom;
-    return c.json({ success: true, data: { ...publicRoom, ...attendance } });
   } else {
     Object.assign(classroom, attendance);
+    broadcast('ATTENDANCE_UPDATED', classroom);
   }
-
-  broadcast('ATTENDANCE_UPDATED', classroom);
-  const { periodInvigilators: _assignmentIds, invigilatorUsername: _defaultUsername, ...publicRoom } = classroom;
-  return c.json({ success: true, data: publicRoom });
+  return c.json({ success: true, data: attendance });
 });
 
 // Update classroom metadata (grade, className, invigilator, expectedCount, totalSeats)

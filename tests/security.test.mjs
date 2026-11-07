@@ -12,13 +12,12 @@ const base = () => {
   state.classrooms.push({ classId: 'test-room', grade: 9, className: '測試考場', invigilator: '測試教師', expectedCount: 30, presentCount: 29, absentCount: 1, absentStudents: [{seatNo:1,name:'測試學生',reason:'病假'}], totalSeats:30, statusReported:true, lastUpdated:'', periodAttendance: { 'test-period': {expectedCount:30,presentCount:29,absentCount:1,absentStudents:[{seatNo:1,name:'測試學生',reason:'其他私人原因'}],statusReported:true,lastUpdated:''} } });
   return state;
 };
-test('M01: anonymous REST/snapshot DTO and period update masking remove names and all reasons', () => {
+test('M01: public attendance removes names and free-text reasons while keeping standard categories', () => {
   const state = base(); const view = api.visibleState(state,null);
-  for (const record of [view.classrooms[0],view.classrooms[0].periodAttendance['test-period']]) {
-    assert.equal(record.absentStudents[0].name,''); assert.equal(record.absentStudents[0].reason,'');
-  }
-  assert.deepEqual(api.publicAbsences(state.classrooms[0].absentStudents), [{seatNo:1,name:'',reason:''}]);
-  assert.equal(api.publicAbsenceReason('病假'),'');
+  assert.deepEqual(view.classrooms[0].absentStudents, [{seatNo:1,name:'',reason:'病假'}]);
+  assert.deepEqual(view.classrooms[0].periodAttendance['test-period'].absentStudents, [{seatNo:1,name:'',reason:''}]);
+  for (const reason of api.ABSENCE_REASONS) assert.equal(api.publicAbsenceReason(` ${reason} `),reason);
+  for (const reason of ['病假：私人備註','其他私人原因','',null,undefined]) assert.equal(api.publicAbsenceReason(reason),'');
   assert.equal(api.visibleState(state,{role:'admin',username:'test'}).classrooms[0].absentStudents[0].reason,'病假');
   const teacher = {role:'invigilator',username:'test',invigilation:[{classId:'test-room',periodId:'test-period'}]};
   assert.equal(api.visibleState(state,teacher).classrooms[0].periodAttendance['test-period'].absentStudents[0].reason,'其他私人原因');
