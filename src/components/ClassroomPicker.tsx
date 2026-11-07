@@ -15,7 +15,7 @@ export function ClassroomPicker({ board, classrooms, config, onSelectClassroom }
   const Icon = isBlackboard ? Monitor : LayoutGrid;
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5 pb-6">
+    <div className={`mx-auto w-full max-w-6xl space-y-5 pb-6${isBlackboard ? ' blackboard-picker' : ''}`}>
       <section className="attendance-banner relative isolate overflow-hidden rounded-3xl px-5 py-7 text-white sm:px-9 sm:py-10 lg:px-12 lg:py-12">
         <div className="attendance-banner-pattern pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3" aria-hidden="true" />
         <div className="grid items-center gap-7 lg:grid-cols-[1fr_auto]">
@@ -24,9 +24,9 @@ export function ClassroomPicker({ board, classrooms, config, onSelectClassroom }
               <Icon size={16} aria-hidden="true" />
               {isBlackboard ? '教室電子黑板' : '考場出席即時看板'}
             </p>
-            <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">選擇班級</h1>
+            <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{isBlackboard ? '選擇要顯示的班級' : '選擇班級'}</h1>
             <p className="mt-3 text-sm leading-7 text-slate-200 sm:text-base">
-              {isBlackboard ? '選擇班級後，即可查看該班的考程、出席狀態與公告。' : '選擇班級後，即可查看該班的出席統計與缺席明細。'}
+              {isBlackboard ? '點選班級，開啟考試時間、出席與教務公告。進入後可切換全螢幕投影。' : '選擇班級後，即可查看該班的出席統計與缺席明細。'}
             </p>
           </div>
           <dl className="grid w-full max-w-sm gap-3 rounded-2xl border border-white/20 bg-slate-950/30 p-4 text-sm lg:min-w-60">
@@ -64,7 +64,7 @@ export function ClassroomPicker({ board, classrooms, config, onSelectClassroom }
         ) : (
           <div className="mt-5 space-y-6">
             {grades.map((grade) => (
-              <section key={grade} aria-labelledby={`picker-grade-${grade}`}>
+              <section key={grade} className={isBlackboard ? 'blackboard-picker-grade' : undefined} aria-labelledby={`picker-grade-${grade}`}>
                 <h3 id={`picker-grade-${grade}`} className="mb-2.5 break-words text-sm font-bold text-slate-700">{gradeLabel(config, grade)}</h3>
                 <ul className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
                   {classrooms.filter((room) => room.grade === grade).map((room) => (
