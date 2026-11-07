@@ -179,9 +179,8 @@ export default function App() {
   const isAdminAuthed = session?.role === 'admin';
   const isInvigilatorAuthed = session?.role === 'invigilator' || isAdminAuthed;
   const loggedInUsername = session?.username || '';
-  const [autoOpenMenuSignal, setAutoOpenMenuSignal] = useState<number>(0);
   const mainRef = useRef<HTMLElement>(null);
-  const previousNavigation = useRef({ path: currentPath, menuSignal: autoOpenMenuSignal });
+  const previousNavigation = useRef(currentPath);
 
   const [systemData, setSystemData] = useState<SystemData>(createEmptyExamState);
 
@@ -448,15 +447,15 @@ export default function App() {
 
   useEffect(() => {
     const previous = previousNavigation.current;
-    previousNavigation.current = { path: currentPath, menuSignal: autoOpenMenuSignal };
-    if (previous.path === currentPath || previous.menuSignal !== autoOpenMenuSignal) return;
+    previousNavigation.current = currentPath;
+    if (previous === currentPath) return;
 
-    const [, oldView, oldClass] = previous.path.split('/');
+    const [, oldView, oldClass] = previous.split('/');
     const [, newView, newClass] = currentPath.split('/');
     const sameBoard = oldView === newView && (newView === 'blackboard' || newView === 'attendance');
     if (sameBoard && oldClass && newClass) return;
     mainRef.current?.focus();
-  }, [currentPath, autoOpenMenuSignal]);
+  }, [currentPath]);
 
   const handleLoginSuccess = (authData: ExamSession) => {
     setSession(authData);
@@ -467,9 +466,6 @@ export default function App() {
     if (authData.classId) {
       setSelectedClassId(authData.classId);
     }
-
-    // Trigger the Header floating permission menu to open so user immediately sees their permitted buttons
-    if (activeView !== 'academic' && intendedView !== 'academic') setAutoOpenMenuSignal((prev) => prev + 1);
 
     // Navigate to intended view or default portal for their role
     if (activeView === 'academic' && authData.role === 'admin') {
@@ -553,7 +549,6 @@ export default function App() {
         canSubmitCorrections={session?.canSubmitCorrections}
         loggedInUsername={loggedInUsername}
         loggingOut={loggingOut}
-        autoOpenMenuSignal={autoOpenMenuSignal}
         onLogout={handleLogoutAll}
       />
       <RequestActivity />
@@ -685,7 +680,6 @@ export default function App() {
                           initialPeriodId={invigilatorPeriodId}
                           allowedPeriodIds={isAdminAuthed ? undefined : teacherPeriods(invigilatorClassroom.classId)}
                           correctionSubmission={correctionSubmission}
-                          onLogout={handleLogoutAll}
                         />
                       ) : invigilatorTab === 'corrections' && correctionSubmission ? (
                         correctionSubmission
@@ -719,8 +713,6 @@ export default function App() {
                     onSelectClassroom={(id, periodId) => {
                       navigateToInvigilatorTab('attendance', id, periodId);
                     }}
-                    onLogout={handleLogoutAll}
-                    loggingOut={loggingOut}
                     activeAdminTab={activeAdminTab}
                     onAdminTabChange={navigateToAdminTab}
                     activeSettingsPage={activeSettingsPage}

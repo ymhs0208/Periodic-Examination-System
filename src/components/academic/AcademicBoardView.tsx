@@ -142,7 +142,7 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
     </button>
   </div>;
   return <section ref={boardRef} className={`academic-board${projection ? ' academic-board--projection' : ''}`} aria-labelledby="academic-board-title">
-    {projection ? <header className="academic-header">
+    <header className="academic-header">
       <div className="academic-toolbar">
         <div className="academic-brand">
           <span className="academic-brand-icon"><Monitor size={17} aria-hidden="true" /></span>
@@ -165,15 +165,7 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
           <time dateTime={overview.today} className="academic-clock-date">{overview.today}</time>
         </div>
       </div>
-    </header> : <header className="academic-header">
-      <div className="academic-brand"><span className="academic-brand-icon"><Monitor aria-hidden="true" /></span><div>
-        <p><span className="academic-eyebrow">教務處總覽看板</span>{schoolName}</p>
-        <h1 id="academic-board-title">{examTitle}</h1>
-      </div></div>
-      <div className="academic-header-right"><div className="academic-clock"><strong>{clock.format(now)}</strong><span>{overview.today} · 台北時間</span></div>
-        {actions}
-      </div>
-    </header>}
+    </header>
     {!connected && <div className="academic-connection academic-connection--lost" role="status">
       <WifiOff size={22} aria-hidden="true" />
       <div><strong>{liveConnection === 'offline' ? '網路離線 · 資料暫停更新' : liveConnection === 'connecting' ? '正在建立即時連線 · 資料尚未確認' : '同步連線中斷 · 正在重連'}</strong>
@@ -181,7 +173,7 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
       <button type="button" onClick={onReconnect}><RotateCw size={17} aria-hidden="true" />重新連線</button>
     </div>}
     {fullscreenNotice && <p className="academic-fullscreen-notice" role="status">{fullscreenNotice}</p>}
-    <div className={projection ? 'academic-layout' : 'contents'}>
+    <div className="academic-layout">
     <dl className="academic-metrics">
       <div><dt>全校考場</dt><dd>{totals.total}<small>場</small></dd><p>考試中 {totals.active} 場</p></div>
       <div><dt>已回報</dt><dd>{totals.reported}<small>/ {totals.scheduled} 場</small></dd><p>依各班顯示節次</p></div>

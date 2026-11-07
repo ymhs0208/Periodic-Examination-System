@@ -10,7 +10,6 @@ import {
   FileQuestion,
   Wrench,
   Siren,
-  LogOut,
   DoorOpen,
   Users,
   Clock,
@@ -36,7 +35,6 @@ interface InvigilatorViewProps {
   announcements: ExamAnnouncement[];
   classList: Pick<ClassroomExamState, 'classId' | 'className' | 'grade'>[];
   onSelectClass: (classId: string) => void;
-  onLogout?: () => void;
   initialPeriodId?: string;
   allowedPeriodIds?: string[];
 }
@@ -153,7 +151,6 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   announcements,
   classList,
   onSelectClass,
-  onLogout,
   period,
   periodControls,
   tab,
@@ -178,6 +175,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
   const [attendanceSavedMessage, setAttendanceSavedMessage] = useState(false);
   const [absentSeatInput, setAbsentSeatInput] = useState('');
+  const [absentReasonInput, setAbsentReasonInput] = useState('');
   const [attendanceError, setAttendanceError] = useState('');
 
   const [selectedPresetId, setSelectedPresetId] = useState<string>('');
@@ -224,29 +222,45 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   const announcementNow = useAnnouncementClock(announcements);
   const currentAnnouncements = classroomAnnouncements(announcements, classroom, announcementNow);
 
-  const handleToggleSeat = (seatNo: number) => {
+  const markSeatsAbsent = (seatNos: number[]) => {
+    if (!absentReasonInput) {
+      setAttendanceError('請先選擇假別，再標記缺席座號。');
+      return false;
+    }
+    const newSeats = [...new Set(seatNos)].filter((seatNo) => !absentStudents.some((student) => student.seatNo === seatNo));
+    if (!newSeats.length) return true;
+    if (absentStudents.length + newSeats.length > attendanceRecord.expectedCount) {
+      setAttendanceError('缺席人數不可超過應到人數；座位數不代表本節應到人數。');
+      return false;
+    }
     lockPeriod();
     setAttendanceSavedMessage(false);
+    setAttendanceError('');
+    setAbsentStudents([
+      ...absentStudents,
+      ...newSeats.map((seatNo) => ({ seatNo, name: '', reason: absentReasonInput }))
+    ].sort((a, b) => a.seatNo - b.seatNo));
+    return true;
+  };
+
+  const handleToggleSeat = (seatNo: number) => {
     const existingIndex = absentStudents.findIndex((s) => s.seatNo === seatNo);
     if (existingIndex >= 0) {
+      lockPeriod();
+      setAttendanceSavedMessage(false);
       setAbsentStudents(absentStudents.filter((s) => s.seatNo !== seatNo));
-    } else {
-      if (absentStudents.length >= attendanceRecord.expectedCount) { setAttendanceError('缺席人數不可超過應到人數；座位數不代表本節應到人數。'); return; }
-      const updated = [
-        ...absentStudents,
-        {
-          seatNo,
-          name: '',
-          reason: ''
-        }
-      ].sort((a, b) => a.seatNo - b.seatNo);
-      setAbsentStudents(updated);
+      return;
     }
+    markSeatsAbsent([seatNo]);
   };
 
   const handleAddAbsentSeats = (event: React.FormEvent) => {
     event.preventDefault();
     if (isSubmittingAttendance) return;
+    if (!absentReasonInput) {
+      setAttendanceError('請先選擇假別，再輸入缺席座號。');
+      return;
+    }
     const parsed = parseAbsentSeatNumbers(absentSeatInput);
     if (parsed.error || !parsed.seats) {
       setAttendanceError(parsed.error ?? '請輸入缺席座號。');
@@ -262,18 +276,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
       setAttendanceError('這些座號都已列為缺席。');
       return;
     }
-    if (absentStudents.length + newSeats.length > attendanceRecord.expectedCount) {
-      setAttendanceError('缺席人數不可超過應到人數；座位數不代表本節應到人數。');
-      return;
-    }
-    lockPeriod();
-    setAttendanceSavedMessage(false);
-    setAttendanceError('');
-    setAbsentStudents([
-      ...absentStudents,
-      ...newSeats.map((seatNo) => ({ seatNo, name: '', reason: '' }))
-    ].sort((a, b) => a.seatNo - b.seatNo));
-    setAbsentSeatInput('');
+    if (markSeatsAbsent(newSeats)) setAbsentSeatInput('');
   };
 
   const handleMarkAllPresent = () => {
@@ -393,19 +396,12 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
             ? { label: '點名狀態', value: reportStatus, icon: CheckCircle2, tone: reportStatus === '本節已回報' ? 'success' : 'warning' }
             : { label: '監考教師', value: (period && attendanceRecord.invigilator) || '—', icon: UserRound }
         ]}
-        actions={<>
-          {classList.length > 1 && (
+        actions={classList.length > 1 ? (
             <select value={classroom.classId} aria-label="切換監考班級" onChange={(event) => onSelectClass(event.target.value)}
               className="min-h-10 min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-2 text-sm font-bold text-slate-900">
               {classList.map((room) => <option key={room.classId} value={room.classId}>{room.className}</option>)}
             </select>
-          )}
-          {onLogout && (
-            <button type="button" onClick={onLogout} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-100">
-              <LogOut size={15} aria-hidden="true" />登出
-            </button>
-          )}
-        </>}>
+          ) : undefined}>
         {tab === 'attendance' ? periodControls : null}
       </WorkbenchHeader>
 
@@ -416,7 +412,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
               <h2 id="invigilator-attendance-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
                 <ClipboardCheck size={20} className="text-teal-800" aria-hidden="true" />座號點名
               </h2>
-              <p className="mt-1 text-sm text-slate-700">只標記缺席，其餘視為到齊；可直接輸入座號，或展開座位分布點選。送出後才正式回報。假別選填。草稿依班級與節次保留於本分頁。</p>
+              <p className="mt-1 text-sm text-slate-700">只標記缺席，其餘視為到齊；先選擇假別，再輸入座號或展開座位分布點選。送出後才正式回報。草稿依班級與節次保留於本分頁。</p>
             </div>
             {period && <p className={`rounded-full px-2.5 py-1 text-xs font-bold ${reportStatus === '本節已回報' ? 'bg-teal-100 text-teal-950' : 'bg-amber-100 text-amber-950'}`}>{reportStatus}</p>}
           </div>
@@ -442,24 +438,34 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
 
                 <form onSubmit={handleAddAbsentSeats} className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <label htmlFor="absent-seat-input" className="text-sm font-black text-slate-950">直接輸入缺席座號</label>
+                    <h3 className="text-sm font-black text-slate-950">直接輸入缺席座號</h3>
                     <button type="button" disabled={!absentCount || isSubmittingAttendance} onClick={handleMarkAllPresent}
                       className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-2.5 text-xs font-bold text-teal-900 hover:bg-teal-50 disabled:opacity-50">
                       <Check size={16} aria-hidden="true" />標記全班到齊
                     </button>
                   </div>
-                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-                    <input id="absent-seat-input" type="text" autoComplete="off" enterKeyHint="done"
-                      value={absentSeatInput} disabled={isSubmittingAttendance}
-                      placeholder="例如 3、7、15"
-                      onChange={(event) => setAbsentSeatInput(event.target.value)}
-                      className="min-h-12 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 font-mono text-base font-bold text-slate-950 placeholder:font-sans placeholder:font-bold placeholder:text-slate-400" />
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(8rem,12rem)_minmax(0,1fr)_auto]">
+                    <label className="min-w-0 text-xs font-bold text-slate-700">假別
+                      <select id="absent-reason-input" required value={absentReasonInput} disabled={isSubmittingAttendance}
+                        onChange={(event) => setAbsentReasonInput(event.target.value)}
+                        className="mt-1 block min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-950">
+                        <option value="">請選擇假別</option>
+                        {ABSENCE_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
+                      </select>
+                    </label>
+                    <label className="min-w-0 text-xs font-bold text-slate-700" htmlFor="absent-seat-input">缺席座號
+                      <input id="absent-seat-input" type="text" autoComplete="off" enterKeyHint="done"
+                        value={absentSeatInput} disabled={isSubmittingAttendance}
+                        placeholder="例如 3、7、15"
+                        onChange={(event) => setAbsentSeatInput(event.target.value)}
+                        className="mt-1 block min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 font-mono text-base font-bold text-slate-950 placeholder:font-sans placeholder:font-bold placeholder:text-slate-400" />
+                    </label>
                     <button type="submit" disabled={isSubmittingAttendance || !absentSeatInput.trim()}
-                      className="inline-flex min-h-12 items-center justify-center rounded-xl bg-rose-700 px-4 text-sm font-black text-white hover:bg-rose-800 disabled:opacity-50">
+                      className="inline-flex min-h-12 items-center justify-center rounded-xl bg-rose-700 px-4 text-sm font-black text-white hover:bg-rose-800 disabled:opacity-50 sm:mt-5">
                       加入缺席
                     </button>
                   </div>
-                  <p className="text-xs font-bold text-slate-600">可用頓號、逗號或空白分隔多個座號，按 Enter 即可加入。</p>
+                  <p className="text-xs font-bold text-slate-600">先選擇假別，再輸入座號或展開座位分布點選。可用頓號、逗號或空白分隔多個座號。</p>
                 </form>
 
                 <details className="group rounded-xl border border-slate-200 bg-white">

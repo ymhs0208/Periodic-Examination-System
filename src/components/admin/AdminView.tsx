@@ -19,7 +19,6 @@ import {
   FileText,
   Wrench,
   Check,
-  LogOut,
   Maximize2,
   Minimize2,
   LayoutGrid,
@@ -75,8 +74,6 @@ interface AdminViewProps {
   data: SystemData;
   onSelectClassroom?: (classId: string, periodId?: string) => void;
   isEmbedded?: boolean;
-  onLogout?: () => void;
-  loggingOut?: boolean;
   activeAdminTab?: AdminTab;
   onAdminTabChange?: (tab: AdminTab) => void;
   activeSettingsPage?: AdminSettingsPage;
@@ -102,8 +99,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   data: sourceData,
   onSelectClassroom,
   isEmbedded = false,
-  onLogout,
-  loggingOut,
   activeAdminTab,
   onAdminTabChange,
   activeSettingsPage,
@@ -134,7 +129,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Broadcast Form State
   const [targetAudience, setTargetAudience] = useState<string>('all');
   const [annoType, setAnnoType] = useState<AnnouncementType>('correction');
-  const [annoSubject, setAnnoSubject] = useState<string>(selectedPeriod?.subject ?? sourceData.config.subject);
+  const [annoSubject, setAnnoSubject] = useState<string>(() => {
+    const subjects = scheduledExamSubjects(sourceData.config);
+    const preferred = selectedPeriod?.subject ?? sourceData.config.subject;
+    if (preferred && subjects.includes(preferred)) return preferred;
+    return subjects[0] ?? preferred ?? '';
+  });
   const [annoTitle, setAnnoTitle] = useState<string>('');
   const [annoContent, setAnnoContent] = useState<string>('');
   const [annoStartsAt, setAnnoStartsAt] = useState('');
@@ -487,6 +487,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
     if (!annoTitle.trim() || !annoContent.trim() || isPublishing) return;
     setPublishError('');
     setPublishSuccess(false);
+    if (examSubjects.length && !annoSubject.trim()) {
+      setPublishError('請選擇考程表科目。');
+      return;
+    }
     const startsAt = parseAnnouncementTime(annoStartsAt);
     const endsAt = parseAnnouncementTime(annoEndsAt);
     const now = serverNowMs();
@@ -511,7 +515,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     };
     if (!await confirmAction({
       title: '確認發布考務公告',
-      description: '考科僅為標籤，不限制接收對象；時間延長僅發布通知，不會修改考程。需延後結束時間時，請至考務設定 → 考程調整。',
+      description: '考科從考程表科目選擇，不因此限制接收對象；時間延長僅發布通知，不會修改考程。需延後結束時間時，請至考務設定 → 考程調整。',
       facts: [
         { label: '發布對象', value: `${getTargetAudienceLabel(announcement.targetAudience)}（${sourceData.classrooms.filter((room) => announcement.targetAudience === 'all' || announcement.targetAudience === room.classId || announcement.targetAudience === `grade_${room.grade}`).map((room) => room.className).join('、') || '無符合班級'}）` },
         { label: '考科', value: announcement.subject || '未指定' },
@@ -1244,18 +1248,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <p className="mt-0.5 text-sm leading-6 text-slate-600">{currentSection.description}</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {activeTab === 'reports' && <button type="button" onClick={exportAttendanceCSV}
-              className="flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
-              <Download size={16} className="text-teal-800" aria-hidden="true" />匯出全校彙總＋目前篩選明細 CSV
-            </button>}
-            {onLogout && (
-              <button type="button" disabled={loggingOut} onClick={onLogout}
-                className="flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 text-xs font-bold text-rose-800 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-rose-700 disabled:opacity-50">
-                <LogOut size={16} aria-hidden="true" />{loggingOut ? '登出中…' : '登出'}
-              </button>
-            )}
-          </div>
+          {activeTab === 'reports' && <button type="button" onClick={exportAttendanceCSV}
+            className="flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
+            <Download size={16} className="text-teal-800" aria-hidden="true" />匯出全校彙總＋目前篩選明細 CSV
+          </button>}
         </div>
 
         {activeTab === 'settings' && (configConflict || configDirty.current) && <div role="status" className="mb-3 rounded-xl bg-amber-50 p-3 text-sm font-bold">
@@ -1574,7 +1570,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 pb-2">
                   <div className="flex items-center gap-2 text-amber-950 font-black text-sm">
                     <Radio className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />
-                    <span>試題更正／公告（考科僅為標籤；時間延長不改考程）</span>
+                    <span>試題更正／公告（考科請選考程表科目；時間延長不改考程）</span>
                   </div>
                 </div>
                 <div>
@@ -1588,6 +1584,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   />
                 </div>
                 <div>
+                  <label htmlFor="admin-embed-anno-subject" className="block text-xs font-black text-slate-700 mb-1">考科</label>
+                  <select id="admin-embed-anno-subject"
+                    value={annoSubject}
+                    onChange={(e) => setAnnoSubject(e.target.value)}
+                    aria-label="考程表科目"
+                    className="w-full min-h-[42px] text-xs font-black p-2.5 rounded-xl border border-slate-300 bg-white text-slate-900"
+                  >
+                    <option value="">{examSubjects.length ? '選擇考程表科目' : '考程表尚無科目'}</option>
+                    {annoSubject && !examSubjects.includes(annoSubject) && (
+                      <option value={annoSubject}>{annoSubject}（目前考程未列）</option>
+                    )}
+                    {examSubjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
+                  </select>
+                </div>
+                <div>
                   <textarea
                     rows={2}
                     value={annoContent}
@@ -1597,7 +1608,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 font-bold"
                   />
                 </div>
-                <p className="text-xs font-bold text-amber-900">考科僅為標籤，不會限制接收班級。「時間延長」僅發布通知，考程時間不變；若需延後，請至考務設定 → 考程調整。</p>
+                <p className="text-xs font-bold text-amber-900">考科請從考程表科目選擇，不會因此限制接收班級。「時間延長」僅發布通知，考程時間不變；若需延後，請至考務設定 → 考程調整。</p>
                 {announcementScheduleFields}
                 <button
                   type="submit"
@@ -1647,13 +1658,19 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="admin-anno-subject" className="block text-xs font-black text-slate-700 mb-1">考科（僅標籤）</label>
-                    <input id="admin-anno-subject"
-                      type="text"
+                    <label htmlFor="admin-anno-subject" className="block text-xs font-black text-slate-700 mb-1">考科</label>
+                    <select id="admin-anno-subject"
                       value={annoSubject}
                       onChange={(e) => setAnnoSubject(e.target.value)}
                       className="w-full min-h-[42px] text-xs font-black p-2.5 rounded-xl border border-slate-300 bg-white"
-                    />
+                    >
+                      <option value="">{examSubjects.length ? '選擇考程表科目' : '考程表尚無科目'}</option>
+                      {annoSubject && !examSubjects.includes(annoSubject) && (
+                        <option value={annoSubject}>{annoSubject}（目前考程未列）</option>
+                      )}
+                      {examSubjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
+                    </select>
+                    {!examSubjects.length && <p className="mt-1 text-xs font-bold text-slate-600">請先到「考務設定 → 考程表」新增考試節次。</p>}
                   </div>
                   <div>
                     <label htmlFor="admin-anno-type" className="block text-xs font-black text-slate-700 mb-1">類型</label>
@@ -1693,7 +1710,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   />
                 </div>
 
-                <p className="text-xs font-bold text-amber-900">考科僅為標籤，不會限制接收班級。「時間延長」僅發布通知，考程時間不變；若需延後，請至考務設定 → 考程調整。</p>
+                <p className="text-xs font-bold text-amber-900">考科請從考程表科目選擇，不會因此限制接收班級。「時間延長」僅發布通知，考程時間不變；若需延後，請至考務設定 → 考程調整。</p>
                 {announcementScheduleFields}
                 <button
                   type="submit"

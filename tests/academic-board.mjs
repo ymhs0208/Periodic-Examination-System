@@ -63,7 +63,7 @@ try {
     assert.doesNotMatch(html, /絕不可投影姓名|絕不可投影原因|不應投影帳號/);
   });
   check('header does not show board entries', () => {
-    const header = (admin) => renderToStaticMarkup(React.createElement(Header, { activeView: 'academic', currentPath: '/board/academic', isAdminAuthed: admin, isInvigilatorAuthed: false, autoOpenMenuSignal: 0, loggedInUsername: '', onViewChange() {}, onNavigateAdminTab() {}, onLogout() {} }));
+    const header = (admin) => renderToStaticMarkup(React.createElement(Header, { activeView: 'academic', currentPath: '/board/academic', isAdminAuthed: admin, isInvigilatorAuthed: false, loggedInUsername: '', onViewChange() {}, onNavigateAdminTab() {}, onLogout() {} }));
     assert.doesNotMatch(header(true), /教務處看板|出席即時看板|教室電子黑板/);
     assert.doesNotMatch(header(false), /href="\/board\/academic"/);
   });

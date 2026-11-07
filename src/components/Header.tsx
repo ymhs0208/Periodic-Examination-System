@@ -30,7 +30,6 @@ interface HeaderProps {
   checkingSession?: boolean;
   canSubmitCorrections?: boolean;
   loggedInUsername: string;
-  autoOpenMenuSignal: number;
   onLogout: () => void;
   loggingOut?: boolean;
 }
@@ -67,7 +66,7 @@ function itemPath(item: NavigationItem) {
 
 export function Header({
   activeView, currentPath, onViewChange, onNavigateAdminTab, isInvigilatorAuthed, isAdminAuthed, checkingSession, canSubmitCorrections,
-  loggedInUsername, autoOpenMenuSignal, onLogout, loggingOut
+  loggedInUsername, onLogout, loggingOut
 }: HeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -80,8 +79,7 @@ export function Header({
 
   useEffect(() => {
     if (!isAuthenticated) setIsMenuOpen(false);
-    else if (autoOpenMenuSignal > 0) setIsMenuOpen(true);
-  }, [autoOpenMenuSignal, isAuthenticated]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!menuVisible) return;
