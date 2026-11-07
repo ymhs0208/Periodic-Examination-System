@@ -5,7 +5,7 @@ import { serverNow } from './types/time';
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ClipboardCheck } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { Header, VIEW_PATHS, type ActiveView } from './components/Header';
 import { BoardPortalHome } from './components/BoardPortalHome';
 import { BlackboardView } from './components/blackboard/BlackboardView';
@@ -14,6 +14,9 @@ import { AttendanceBoardView } from './components/attendance/AttendanceBoardView
 import { ClassroomPicker } from './components/ClassroomPicker';
 import { ScheduledInvigilatorView } from './components/invigilator/InvigilatorView';
 import { TeacherAssignments } from './components/invigilator/TeacherAssignments';
+import { WorkbenchHeader } from './components/invigilator/WorkbenchHeader';
+import { useAnnouncementClock } from './components/useAnnouncementClock';
+import { classroomAnnouncements } from './types/announcements';
 import { examPeriods, periodApplies } from './types/examSchedule';
 import { InvigilatorNavigation, invigilatorPath, invigilatorTitle, isInvigilatorTab, type InvigilatorTab } from './components/invigilator/InvigilatorNavigation';
 import { CorrectionSubmission } from './components/CorrectionWorkflow';
@@ -522,6 +525,14 @@ export default function App() {
         assignments={session.examAuthorAssignments ?? []} />
     : null;
   const invigilatorRouteClassId = isAdminAuthed || teacherRooms.length > 1 ? invigilatorClassroom?.classId : undefined;
+  const showWorkbench = activeView === 'invigilator' && isInvigilatorAuthed;
+  const announcementNow = useAnnouncementClock(systemData.announcements, showWorkbench);
+  const workbenchAnnouncements = showWorkbench && invigilatorClassroom
+    ? classroomAnnouncements(systemData.announcements, invigilatorClassroom, announcementNow) : [];
+  const openRoomIssues = showWorkbench ? systemData.issues.filter((issue) =>
+    issue.classId === invigilatorClassroom?.classId && issue.status !== 'resolved').length : 0;
+  const pendingCorrections = showWorkbench && correctionSubmission ? systemData.correctionProposals?.filter((item) =>
+    item.teacherId === session?.teacherId && item.status === 'pending').length ?? 0 : 0;
 
   return (
     <div
@@ -549,7 +560,7 @@ export default function App() {
         loggingOut={loggingOut}
         onLogout={handleLogoutAll}
       />
-      <RequestActivity />
+      {!showWorkbench && <RequestActivity />}
 
       {/* 主畫面（依獨立路徑渲染） */}
       <main
@@ -576,7 +587,7 @@ export default function App() {
           <SystemFeedback title="暫時無法確認登入狀態" detail="請重新載入，系統會再次確認你的登入狀態。" onRetry={retryLoading} />
         ) : (
           <>
-            {connectionMessage && !viewingClassroomBoard && activeView !== 'academic' && activeView !== 'login' && (
+            {connectionMessage && !showWorkbench && !viewingClassroomBoard && activeView !== 'academic' && activeView !== 'login' && (
               <p role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-950">{connectionMessage}</p>
             )}
             {/* 獨立路徑 0: /login (獨立登入頁面) */}
@@ -649,44 +660,67 @@ export default function App() {
 
             {/* 獨立路徑 3: /invigilator (監考老師點名端) */}
             {activeView === 'invigilator' && (
-              <div className="max-w-6xl mx-auto space-y-4">
+              <div className="min-w-0">
                 {isInvigilatorAuthed ? (
-                  <>
+                  <div className="teacher-workbench">
                     <InvigilatorNavigation active={invigilatorTab} classId={invigilatorRouteClassId}
+                      examName={systemData.config.examName}
                       showAssignments={session?.role === 'invigilator'} showCorrections={Boolean(correctionSubmission)}
+                      status={{
+                        announcements: workbenchAnnouncements.length ? `${workbenchAnnouncements.length} 則公告` : undefined,
+                        issues: openRoomIssues ? `${openRoomIssues} 則未結案` : undefined,
+                        corrections: pendingCorrections ? `${pendingCorrections} 則待審` : undefined
+                      }}
                       onNavigate={(tab) => navigateToInvigilatorTab(tab, invigilatorRouteClassId)} />
-                    {invigilatorTab === 'assignments' && session?.role === 'invigilator' ? (
-                      teacherRooms.length ? teacherRooms.map((room, index) => {
-                        const assigned = teacherPeriods(room.classId);
-                        return <TeacherAssignments key={room.classId} classroom={room} config={systemData.config} heading={index === 0 ? 'h1' : 'h2'}
-                          periods={examPeriods(systemData.config).filter((period) => periodApplies(period, room) && (!assigned || assigned.includes(period.id)))}
-                          onSelectPeriod={(periodId) => navigateToInvigilatorTab('attendance', room.classId, periodId)} />;
-                      }) : <TeacherAssignments config={systemData.config} />
-                    ) : invigilatorClassroom ? (
+                    <div className="min-w-0 space-y-4">
+                      {connectionMessage && (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <button type="button" onClick={() => examSync.reconnect()}
+                            className="inline-flex min-h-11 flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-1 text-sm font-bold text-slate-900 hover:bg-amber-50">
+                            <RefreshCw size={16} aria-hidden="true" />重新連線
+                            <span className="wb-button-status" data-tone="warning">{liveConnection === 'offline' ? '離線' : liveConnection === 'connecting' ? '連線中' : '重連中'}</span>
+                          </button>
+                          <p className="text-xs text-slate-600">目前顯示上次讀取的資料。</p>
+                        </div>
+                      )}
+                      <p role="status" className="sr-only">{connectionMessage}</p>
+                      {invigilatorTab === 'assignments' && session?.role === 'invigilator' ? (
+                        <>
+                          <WorkbenchHeader tab="assignments" />
+                          {teacherRooms.length ? teacherRooms.map((room) => {
+                            const assigned = teacherPeriods(room.classId);
+                            return <TeacherAssignments key={room.classId} classroom={room} config={systemData.config}
+                              periods={examPeriods(systemData.config).filter((period) => periodApplies(period, room) && (!assigned || assigned.includes(period.id)))}
+                              onSelectPeriod={(periodId) => navigateToInvigilatorTab('attendance', room.classId, periodId)} />;
+                          }) : <TeacherAssignments config={systemData.config} />}
+                        </>
+                      ) : invigilatorTab === 'corrections' ? (
+                        <>
+                          <WorkbenchHeader tab="corrections" />
+                          {correctionSubmission ?? <p className="wb-panel text-sm text-slate-700">此帳號尚未取得試題更正送審權限。</p>}
+                        </>
+                      ) : invigilatorClassroom && invigilatorTab !== 'assignments' ? (
                         <ScheduledInvigilatorView key={invigilatorClassroom.classId}
                           tab={invigilatorTab}
                           classroom={invigilatorClassroom}
                           config={systemData.config}
                           issues={systemData.issues}
-                          announcements={systemData.announcements}
+                          announcements={workbenchAnnouncements}
                           classList={isAdminAuthed ? classList : teacherRooms}
                           onSelectClass={(classId) => navigateToInvigilatorTab(invigilatorTab, classId, '')}
                           initialPeriodId={invigilatorPeriodId}
                           allowedPeriodIds={isAdminAuthed ? undefined : teacherPeriods(invigilatorClassroom.classId)}
-                          correctionSubmission={correctionSubmission}
                         />
-                      ) : invigilatorTab === 'corrections' && correctionSubmission ? (
-                        correctionSubmission
                       ) : (
-                        <section className="mx-auto max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 sm:p-8">
-                          <div className="mb-3 grid size-11 place-items-center rounded-xl bg-teal-50 text-teal-800"><ClipboardCheck size={22} aria-hidden="true" /></div>
-                          <h1 className="text-xl font-black">{invigilatorTitle(invigilatorTab)}</h1>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">
-                            {invigilatorTab === 'corrections' ? '此帳號尚未取得試題更正送審權限。' : '目前尚無可操作的考場。教務處完成指派後，就能查看考場資料。'}
-                          </p>
-                        </section>
+                        <>
+                          <WorkbenchHeader tab={invigilatorTab} />
+                          <p className="wb-panel text-sm text-slate-700">{invigilatorTab === 'assignments'
+                            ? '此帳號沒有個人的監考安排。'
+                            : '目前尚未指派考場。教務處完成指派後，就能在這裡查看考場資料。'}</p>
+                        </>
                       )}
-                  </>
+                    </div>
+                  </div>
                 ) : (
                   <LoginPage
                     config={systemData.config}

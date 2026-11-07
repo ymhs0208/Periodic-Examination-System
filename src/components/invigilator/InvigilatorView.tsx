@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   Send,
+  Inbox,
   Bell,
-  ClipboardCheck,
   Monitor,
   CheckCircle2,
   Check,
@@ -23,9 +23,7 @@ import type { ClassroomExamState, ExamIssue, IssueType, ExamAnnouncement, Absent
 import { activePeriod, classroomForPeriod, examPeriods, periodApplies, periodLabel } from '../../types/examSchedule';
 import { ExamPeriodSelect, useExamClock } from '../ExamPeriodSelect';
 import { gradeLabel } from '../../types/grades';
-import { classroomAnnouncements } from '../../types/announcements';
 import { useActionConfirmation } from '../useActionConfirmation';
-import { useAnnouncementClock } from '../useAnnouncementClock';
 import { type InvigilatorTab } from './InvigilatorNavigation';
 
 interface InvigilatorViewProps {
@@ -39,9 +37,10 @@ interface InvigilatorViewProps {
   allowedPeriodIds?: string[];
 }
 
-export function ScheduledInvigilatorView({ tab, correctionSubmission, ...props }: InvigilatorViewProps & {
-  tab: InvigilatorTab;
-  correctionSubmission?: React.ReactNode;
+type ClassroomTab = Extract<InvigilatorTab, 'attendance' | 'announcements' | 'issues'>;
+
+export function ScheduledInvigilatorView({ tab, ...props }: InvigilatorViewProps & {
+  tab: ClassroomTab;
 }) {
   const [requested, setRequested] = useState(props.initialPeriodId ?? '');
   const attendanceSection = useRef<HTMLElement>(null);
@@ -64,7 +63,6 @@ export function ScheduledInvigilatorView({ tab, correctionSubmission, ...props }
 
   return (
       <InvigilatorView key={period?.id ?? 'unselected'} {...props} period={period} tab={tab}
-        extraPage={tab === 'corrections' ? correctionSubmission : null}
         periodControls={
           <section ref={attendanceSection} tabIndex={-1} className="min-w-0 text-slate-900" aria-label="點名節次">
             <ExamPeriodSelect periods={periods} value={selected?.id ?? ''} onChange={selectPeriod} autoLabel="自動選擇目前考試" />
@@ -111,7 +109,7 @@ const PRESET_ISSUES = [
   {
     id: 'urgent',
     type: 'urgent' as IssueType,
-    title: '緊急呼叫支援！',
+    title: '緊急支援',
     subtitle: '突發狀況、急需協助',
     icon: Siren,
     color: 'border-red-400 bg-red-100 hover:bg-red-200 text-red-900 ring-2 ring-red-400/30',
@@ -141,8 +139,7 @@ function parseAbsentSeatNumbers(raw: string) {
 const InvigilatorView: React.FC<InvigilatorViewProps & {
   period?: ExamPeriod;
   periodControls: React.ReactNode;
-  tab: InvigilatorTab;
-  extraPage?: React.ReactNode;
+  tab: ClassroomTab;
   lockPeriod: () => void;
 }> = ({
   classroom,
@@ -154,7 +151,6 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   period,
   periodControls,
   tab,
-  extraPage,
   lockPeriod
 }) => {
   const { confirmAction, confirmationDialog } = useActionConfirmation();
@@ -173,16 +169,17 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   const dirty = useRef(!!initialDraft.current);
   const [draftWarning, setDraftWarning] = useState('');
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
-  const [attendanceSavedMessage, setAttendanceSavedMessage] = useState(false);
+  const [attendanceSaved, setAttendanceSaved] = useState(false);
   const [absentSeatInput, setAbsentSeatInput] = useState('');
   const [absentReasonInput, setAbsentReasonInput] = useState('');
+  const [seatError, setSeatError] = useState('');
   const [attendanceError, setAttendanceError] = useState('');
 
   const [selectedPresetId, setSelectedPresetId] = useState<string>('');
   const [issueType, setIssueType] = useState<IssueType>('general');
   const [issueContent, setIssueContent] = useState<string>('');
   const [isSubmittingIssue, setIsSubmittingIssue] = useState(false);
-  const [issueSuccessMessage, setIssueSuccessMessage] = useState(false);
+  const [issueSent, setIssueSent] = useState(false);
   const [issueError, setIssueError] = useState('');
 
   useEffect(() => {
@@ -192,6 +189,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     baseVersion.current = version;
     baseStudents.current = attendanceRecord.absentStudents;
     setAbsentStudents(attendanceRecord.absentStudents);
+    setAttendanceSaved(false);
   }, [classroom.classId, attendanceRecord.statusReported, attendanceRecord.lastUpdated]);
 
   useEffect(() => {
@@ -212,6 +210,8 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     baseVersion.current = attendanceRecord.statusReported ? attendanceRecord.lastUpdated : null;
     baseStudents.current = attendanceRecord.absentStudents;
     setAbsentStudents(attendanceRecord.absentStudents); setRemoteConflict(false);
+    setAttendanceError('');
+    setAttendanceSaved(false);
     try { sessionStorage.removeItem(draftKey); } catch { /* no storage */ }
   };
 
@@ -219,23 +219,22 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   const presentCount = Math.max(0, expectedCount - absentStudents.length);
   const absentCount = absentStudents.length;
   const classroomIssues = issues.filter((i) => i.classId === classroom.classId);
-  const announcementNow = useAnnouncementClock(announcements);
-  const currentAnnouncements = classroomAnnouncements(announcements, classroom, announcementNow);
 
   const markSeatsAbsent = (seatNos: number[]) => {
     if (!absentReasonInput) {
-      setAttendanceError('請先選擇假別，再標記缺席座號。');
+      setSeatError('請先選擇假別，再標記缺席座號。');
       return false;
     }
     const newSeats = [...new Set(seatNos)].filter((seatNo) => !absentStudents.some((student) => student.seatNo === seatNo));
     if (!newSeats.length) return true;
     if (absentStudents.length + newSeats.length > attendanceRecord.expectedCount) {
-      setAttendanceError('缺席人數不可超過應到人數；座位數不代表本節應到人數。');
+      setSeatError('缺席人數不可超過應到人數。');
       return false;
     }
     lockPeriod();
-    setAttendanceSavedMessage(false);
+    setAttendanceSaved(false);
     setAttendanceError('');
+    setSeatError('');
     setAbsentStudents([
       ...absentStudents,
       ...newSeats.map((seatNo) => ({ seatNo, name: '', reason: absentReasonInput }))
@@ -247,7 +246,9 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     const existingIndex = absentStudents.findIndex((s) => s.seatNo === seatNo);
     if (existingIndex >= 0) {
       lockPeriod();
-      setAttendanceSavedMessage(false);
+      setAttendanceSaved(false);
+      setAttendanceError('');
+      setSeatError('');
       setAbsentStudents(absentStudents.filter((s) => s.seatNo !== seatNo));
       return;
     }
@@ -258,22 +259,22 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     event.preventDefault();
     if (isSubmittingAttendance) return;
     if (!absentReasonInput) {
-      setAttendanceError('請先選擇假別，再輸入缺席座號。');
+      setSeatError('請先選擇假別，再輸入缺席座號。');
       return;
     }
     const parsed = parseAbsentSeatNumbers(absentSeatInput);
     if (parsed.error || !parsed.seats) {
-      setAttendanceError(parsed.error ?? '請輸入缺席座號。');
+      setSeatError(parsed.error ?? '請輸入缺席座號。');
       return;
     }
     const invalid = parsed.seats.filter((seatNo) => seatNo > classroom.totalSeats);
     if (invalid.length) {
-      setAttendanceError(`找不到座號 ${invalid.join('、')}；請輸入 1 到 ${classroom.totalSeats} 的座號。`);
+      setSeatError(`找不到座號 ${invalid.join('、')}，請輸入 1 到 ${classroom.totalSeats} 的座號。`);
       return;
     }
     const newSeats = parsed.seats.filter((seatNo) => !absentStudents.some((student) => student.seatNo === seatNo));
     if (!newSeats.length) {
-      setAttendanceError('這些座號都已列為缺席。');
+      setSeatError('這些座號都已列為缺席。');
       return;
     }
     if (markSeatsAbsent(newSeats)) setAbsentSeatInput('');
@@ -281,7 +282,9 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
 
   const handleMarkAllPresent = () => {
     lockPeriod();
-    setAttendanceSavedMessage(false);
+    setAttendanceSaved(false);
+    setSeatError('');
+    setAttendanceError('');
     setAbsentStudents([]);
   };
 
@@ -307,7 +310,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     })) return;
 
     setAttendanceError('');
-    setAttendanceSavedMessage(false);
+    setAttendanceSaved(false);
     setIsSubmittingAttendance(true);
     try {
       const saved = await examSync.updateAttendance(attendance);
@@ -316,8 +319,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
       initialDraft.current = null; dirty.current = false;
       setAbsentStudents(saved.absentStudents); setRemoteConflict(false);
       try { sessionStorage.removeItem(draftKey); } catch { /* no storage */ }
-      setAttendanceSavedMessage(true);
-      setTimeout(() => setAttendanceSavedMessage(false), 4000);
+      setAttendanceSaved(true);
     } catch (error) {
       setAttendanceError(error instanceof Error ? error.message : '點名送出失敗，請稍後再試。');
     } finally {
@@ -329,6 +331,8 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     setSelectedPresetId(preset.id);
     setIssueType(preset.type);
     setIssueContent(preset.text);
+    setIssueSent(false);
+    setIssueError('');
   };
 
   const handleSubmitIssue = async (e: React.FormEvent) => {
@@ -354,12 +358,14 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     })) return;
 
     setIssueError('');
-    setIssueSuccessMessage(false);
+    setIssueSent(false);
     setIsSubmittingIssue(true);
     try {
       await examSync.reportIssue(issue);
-      setIssueSuccessMessage(true);
-      setTimeout(() => setIssueSuccessMessage(false), 4000);
+      setSelectedPresetId('');
+      setIssueType('general');
+      setIssueContent('');
+      setIssueSent(true);
     } catch (error) {
       setIssueError(error instanceof Error ? error.message : '通報送出失敗，請稍後再試。');
     } finally {
@@ -370,82 +376,67 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   const absenceBySeat = new Map(absentStudents.map((student) => [student.seatNo, student]));
   const changed = absentStudents.length !== attendanceRecord.absentStudents.length ||
     attendanceRecord.absentStudents.some((student) => absenceBySeat.get(student.seatNo)?.reason !== student.reason);
-  const reportStatus = changed ? '有未送出的變更' :
-    attendanceRecord.statusReported || attendanceSavedMessage ? '本節已回報' : '本節尚未回報';
+  const reported = attendanceSaved || attendanceRecord.statusReported;
+  const reportStatus = remoteConflict ? '有較新紀錄' : attendanceError ? '請檢查錯誤' :
+    attendanceSaved ? '已回報' : changed ? '尚未送出變更' : reported ? '已回報' : '尚未回報';
+  const reportTone = remoteConflict || attendanceError ? 'error' : reportStatus === '已回報' ? 'success' : 'warning';
   const primary = 'inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-teal-800 px-4 text-sm font-black text-white hover:bg-teal-900 disabled:cursor-default disabled:opacity-50';
   const announcementLabels = { correction: '試題更正', emergency: '緊急公告', extension: '考試延長', notice: '考務公告' };
 
   return (
     <div className="min-w-0 space-y-4">
       {confirmationDialog}
-      {draftWarning && <p role="alert" className="rounded-xl bg-amber-50 p-3">{draftWarning}</p>}
-      {(remoteConflict || initialDraft.current) && <div role="alert" className="rounded-xl bg-amber-50 p-3 text-sm font-bold">
-        {remoteConflict ? '伺服器已有較新的點名，本機草稿未被覆蓋。請先核對最新紀錄，再重新載入。' : '已恢復本班本節未送出的草稿。'}
-        <button type="button" onClick={reloadAttendance} className="ml-3 underline">捨棄草稿並載入最新點名</button>
-      </div>}
       <p role="status" className="sr-only">
-        {currentAnnouncements[0] ? `最新考務公告：${currentAnnouncements[0].title}` : ''}
+        {announcements[0] ? `最新考務公告：${announcements[0].title}` : ''}
       </p>
 
       <WorkbenchHeader tab={tab}
-        info={tab === 'attendance' || tab === 'issues' ? [
+        info={[
           { label: '監考考場', value: `${classroom.className}（${classroom.classId}）`, icon: DoorOpen },
           { label: '年級', value: gradeLabel(config, classroom.grade), icon: Users },
-          { label: '目前節次', value: period ? periodLabel(period) : '非考試時段', icon: Clock },
-          tab === 'attendance'
-            ? { label: '點名狀態', value: reportStatus, icon: CheckCircle2, tone: reportStatus === '本節已回報' ? 'success' : 'warning' }
-            : { label: '監考教師', value: (period && attendanceRecord.invigilator) || '—', icon: UserRound }
-        ] : []}
+          ...(tab === 'issues' ? [
+            { label: '所選節次', value: period ? periodLabel(period) : '尚未選定', icon: Clock },
+            { label: '監考教師', value: (period && attendanceRecord.invigilator) || '—', icon: UserRound }
+          ] : [])
+        ]}
         actions={classList.length > 1 ? (
-            <select value={classroom.classId} aria-label="切換監考班級" onChange={(event) => onSelectClass(event.target.value)}
-              className="min-h-10 min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-2 text-sm font-bold text-slate-900">
-              {classList.map((room) => <option key={room.classId} value={room.classId}>{room.className}</option>)}
-            </select>
-          ) : undefined}>
-        {tab === 'attendance' ? periodControls : null}
-      </WorkbenchHeader>
+            <label className="block min-w-0 text-sm font-bold text-slate-700">切換考場
+              <select value={classroom.classId} onChange={(event) => onSelectClass(event.target.value)}
+                className="mt-1 block min-h-11 w-full min-w-0 max-w-full rounded-xl border border-slate-300 bg-white px-3 text-slate-900">
+                {classList.map((room) => <option key={room.classId} value={room.classId}>{room.className}</option>)}
+              </select>
+            </label>
+          ) : undefined} />
 
       {tab === 'attendance' && (
-        <section id="invigilator-attendance" tabIndex={-1} aria-labelledby="invigilator-attendance-title" className="min-w-0 scroll-mt-4 rounded-2xl border border-slate-200 bg-white">
-          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 p-4 sm:px-5">
-            <div>
-              <h2 id="invigilator-attendance-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
-                <ClipboardCheck size={20} className="text-teal-800" aria-hidden="true" />座號點名
-              </h2>
-              <p className="mt-1 text-sm text-slate-700">只標記缺席，其餘視為到齊；先選擇假別，再輸入座號或展開座位分布點選。送出後才正式回報。草稿依班級與節次保留於本分頁。</p>
-            </div>
-            {period && <p className={`rounded-full px-2.5 py-1 text-xs font-bold ${reportStatus === '本節已回報' ? 'bg-teal-100 text-teal-950' : 'bg-amber-100 text-amber-950'}`}>{reportStatus}</p>}
-          </div>
+        <div className="space-y-4">
+          <section className="wb-panel space-y-3" aria-labelledby="invigilator-attendance-title">
+            <h2 id="invigilator-attendance-title" className="wb-section-title flex items-center gap-2"><span className="wb-step" aria-hidden="true">1</span>確認考試節次</h2>
+            {periodControls}
+            {draftWarning && <p role="alert" className="rounded-xl bg-amber-50 p-3 text-sm">{draftWarning}</p>}
+            {(remoteConflict || initialDraft.current) && <div className="rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-950">
+              <p role="alert">{remoteConflict ? '送出前請先載入最新點名。' : '已恢復這個考場與節次的點名草稿。'}</p>
+              <button type="button" onClick={reloadAttendance} className="inline-flex min-h-11 flex-wrap items-center gap-2 underline">
+                捨棄草稿並載入最新點名
+                {remoteConflict && <span className="wb-button-status" data-tone="warning">有較新紀錄</span>}
+              </button>
+            </div>}
+          </section>
 
-          {period ? (
-            <>
-              <div className="space-y-4 p-4 sm:p-5">
-                <dl className="grid grid-cols-3 gap-2" aria-label="本節出席統計">
-                  {[
-                    { label: '應到人數', value: expectedCount, tone: 'border-slate-200 bg-slate-50 text-slate-950' },
-                    { label: '實到人數', value: presentCount, tone: 'border-teal-200 bg-teal-50 text-teal-950' },
-                    { label: '缺席人數', value: absentCount, tone: 'border-rose-200 bg-rose-50 text-rose-950' }
-                  ].map(({ label, value, tone }) => (
-                    <div key={label} className={`min-w-0 rounded-xl border px-2 py-2.5 sm:px-3.5 ${tone}`}>
-                      <dt className="text-xs font-bold sm:text-sm">{label}</dt>
-                      <dd className="mt-0.5 flex flex-wrap items-baseline gap-1">
-                        <span className="font-mono text-xl font-black tabular-nums sm:text-3xl">{value}</span>
-                        <span className="text-xs font-bold">人</span>
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-
-                <form onSubmit={handleAddAbsentSeats} className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          {period && (
+            <div className="wb-split">
+              <section className="wb-panel space-y-4" aria-labelledby="wb-mark-absent">
+                <h2 id="wb-mark-absent" className="wb-section-title flex items-center gap-2"><span className="wb-step" aria-hidden="true">2</span>標記缺席</h2>
+                <form onSubmit={handleAddAbsentSeats} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-black text-slate-950">直接輸入缺席座號</h3>
+                    <h3 className="text-sm font-black text-slate-950">輸入缺席座號</h3>
                     <button type="button" disabled={!absentCount || isSubmittingAttendance} onClick={handleMarkAllPresent}
-                      className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-2.5 text-xs font-bold text-teal-900 hover:bg-teal-50 disabled:opacity-50">
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-2.5 text-sm font-bold text-teal-900 hover:bg-teal-50 disabled:opacity-50">
                       <Check size={16} aria-hidden="true" />標記全班到齊
                     </button>
                   </div>
-                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(8rem,12rem)_minmax(0,1fr)_auto]">
-                    <label className="min-w-0 text-xs font-bold text-slate-700">假別
+                  <div className="grid min-w-0 gap-3 min-[520px]:grid-cols-2">
+                    <label className="min-w-0 text-sm font-bold text-slate-700">假別
                       <select id="absent-reason-input" required value={absentReasonInput} disabled={isSubmittingAttendance}
                         onChange={(event) => setAbsentReasonInput(event.target.value)}
                         className="mt-1 block min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-950">
@@ -453,7 +444,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
                         {ABSENCE_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
                       </select>
                     </label>
-                    <label className="min-w-0 text-xs font-bold text-slate-700" htmlFor="absent-seat-input">缺席座號
+                    <label className="min-w-0 text-sm font-bold text-slate-700" htmlFor="absent-seat-input">缺席座號
                       <input id="absent-seat-input" type="text" autoComplete="off" enterKeyHint="done"
                         value={absentSeatInput} disabled={isSubmittingAttendance}
                         placeholder="例如 3、7、15"
@@ -461,24 +452,21 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
                         className="mt-1 block min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 font-mono text-base font-bold text-slate-950 placeholder:font-sans placeholder:font-bold placeholder:text-slate-400" />
                     </label>
                     <button type="submit" disabled={isSubmittingAttendance || !absentSeatInput.trim()}
-                      className="inline-flex min-h-12 items-center justify-center rounded-xl bg-rose-700 px-4 text-sm font-black text-white hover:bg-rose-800 disabled:opacity-50 sm:mt-5">
+                      className="inline-flex min-h-11 items-center justify-center rounded-xl border border-teal-200 bg-white px-4 text-sm font-black text-teal-950 hover:bg-teal-50 disabled:opacity-50 min-[520px]:col-span-2">
                       加入缺席
                     </button>
                   </div>
-                  <p className="text-xs font-bold text-slate-600">先選擇假別，再輸入座號或展開座位分布點選。可用頓號、逗號或空白分隔多個座號。</p>
+                  <p className="text-sm leading-5 text-slate-600">先選假別，再輸入座號。多個座號可用頓號、逗號或空白分隔。</p>
                 </form>
 
                 <details className="group rounded-xl border border-slate-200 bg-white">
-                  <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-black text-slate-900 marker:content-none [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-black text-slate-900 marker:content-none [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700">
                     <ChevronDown size={16} className="shrink-0 text-slate-500 transition-transform group-open:rotate-180" aria-hidden="true" />
-                    <span className="inline-flex items-center gap-1.5">
-                      <Monitor size={17} className="text-teal-800" aria-hidden="true" />座位分布
-                    </span>
-                    <span className="font-bold text-slate-600 group-open:hidden">展開以點選座位</span>
-                    <span className="hidden font-bold text-slate-600 group-open:inline">點選座位標記或缺席</span>
+                    <Monitor size={17} className="shrink-0 text-teal-800" aria-hidden="true" />改用座位圖點選
                   </summary>
                   <div className="border-t border-slate-200 p-3">
-                    <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-8 sm:gap-2">
+                    <p className="mb-2 text-sm text-slate-600">選好假別後，點一下標記缺席，再點一次即可取消。</p>
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(3rem,1fr))] gap-1.5">
                       {Array.from({ length: classroom.totalSeats }, (_, index) => {
                         const seat = index + 1;
                         const isAbsent = absenceBySeat.has(seat);
@@ -493,111 +481,145 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
                     </div>
                   </div>
                 </details>
+                {seatError && <p role="alert" className="rounded-lg bg-rose-100 p-3 text-sm font-bold text-rose-950">{seatError}</p>}
+              </section>
 
+              <section className="wb-panel space-y-4" aria-labelledby="wb-check-attendance">
+                <h2 id="wb-check-attendance" className="wb-section-title flex items-center gap-2"><span className="wb-step" aria-hidden="true">3</span>核對並送出</h2>
+                <dl className="grid grid-cols-3 gap-2" aria-label="本節出席統計">
+                  {[
+                    { label: '應到', value: expectedCount, tone: 'border-slate-200 bg-slate-50 text-slate-950' },
+                    { label: '實到', value: presentCount, tone: 'border-teal-200 bg-teal-50 text-teal-950' },
+                    { label: '缺席', value: absentCount, tone: 'border-rose-200 bg-rose-50 text-rose-950' }
+                  ].map(({ label, value, tone }) => (
+                    <div key={label} className={`min-w-0 rounded-xl border px-2 py-3 text-center ${tone}`}>
+                      <dt className="text-sm font-bold">{label}</dt>
+                      <dd className="mt-0.5 font-mono text-xl font-black tabular-nums sm:text-2xl">{value}<span className="ml-1 font-sans text-xs">人</span></dd>
+                    </div>
+                  ))}
+                </dl>
                 <div className={`rounded-xl border p-3 ${absentCount ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}>
                   <h3 className="text-sm font-black text-slate-950">缺席座號與假別 <span className="font-mono text-xs text-slate-700">（{absentCount} 人）</span></h3>
                   {absentCount ? (
-                    <ul className="mt-2 grid gap-2 xl:grid-cols-2">
+                    <ul className="mt-2 grid gap-2">
                       {absentStudents.map((student) => (
                         <li key={student.seatNo} className="flex min-w-0 items-center gap-2 rounded-lg border border-rose-200 bg-white px-2 py-1.5">
                           <span className="shrink-0 text-xs font-black text-rose-900">座號 {student.seatNo}</span>
                           <select aria-label={`座號 ${student.seatNo} 的假別`} value={student.reason} disabled={isSubmittingAttendance}
                             onChange={(event) => {
                               lockPeriod();
-                              setAttendanceSavedMessage(false);
+                              setAttendanceSaved(false);
+                              setAttendanceError('');
                               const reason = event.target.value;
                               setAbsentStudents((students) => students.map((item) => item.seatNo === student.seatNo ? { ...item, reason } : item));
                             }}
-                            className="min-h-10 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-1.5 text-sm text-slate-900">
+                            className="min-h-11 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-1.5 text-sm text-slate-900">
                             <option value="">假別選填（未註明）</option>
                             {student.reason && !ABSENCE_REASONS.includes(student.reason) && <option value={student.reason}>{student.reason}</option>}
                             {ABSENCE_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
                           </select>
                           <button type="button" disabled={isSubmittingAttendance} onClick={() => handleToggleSeat(student.seatNo)}
-                            aria-label={`取消座號 ${student.seatNo} 缺席`} className="min-h-10 shrink-0 rounded-lg px-2 text-xs font-bold text-rose-900 hover:bg-rose-100">
+                            aria-label={`取消座號 ${student.seatNo} 缺席`} className="min-h-11 shrink-0 rounded-lg px-2 text-sm font-bold text-rose-900 hover:bg-rose-100">
                             取消
                           </button>
                         </li>
                       ))}
                     </ul>
-                  ) : <p className="mt-1 text-sm text-slate-700">目前沒有標記缺席的座號。</p>}
+                  ) : <p className="mt-1 text-sm text-slate-700">目前無人列為缺席。全班到齊時可直接送出。</p>}
                 </div>
-              </div>
 
-              <div className="space-y-2 rounded-b-2xl border-t border-slate-200 bg-slate-50 p-4 sm:px-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-bold text-slate-700">送出前會再核對節次、人數與假別。</p>
-                  <button type="button" disabled={isSubmittingAttendance} onClick={handleSaveAttendance} className={`${primary} w-full sm:w-auto`}>
-                    <CheckCircle2 size={19} aria-hidden="true" />{isSubmittingAttendance ? '正在送出點名…' : '送出點名'}
-                  </button>
-                </div>
+                <button type="button" disabled={isSubmittingAttendance} onClick={handleSaveAttendance} className={`${primary} w-full flex-wrap py-2`}>
+                  <CheckCircle2 size={19} aria-hidden="true" />{reported ? '更新點名' : '送出點名'}
+                  <span className="wb-button-status" data-tone={isSubmittingAttendance ? undefined : reportTone}>
+                    {isSubmittingAttendance ? '送出中' : reportStatus}
+                  </span>
+                </button>
                 {attendanceError && <p role="alert" className="rounded-lg bg-rose-100 p-2 text-sm font-bold text-rose-950">{attendanceError}</p>}
-                {attendanceSavedMessage && <p role="status" className="rounded-lg bg-teal-100 p-2 text-sm font-bold text-teal-950">伺服器已儲存點名；其他看板將於連線正常時更新。</p>}
-              </div>
-            </>
-          ) : <p className="p-4 text-sm text-slate-700">尚未選定節次。請查看上方考程或監考指派提示；沒有可用選項時請聯絡教務。</p>}
-        </section>
+                <p role="status" className="sr-only">{isSubmittingAttendance ? '正在送出點名' : attendanceSaved ? '點名已回報' : ''}</p>
+              </section>
+            </div>
+          )}
+        </div>
       )}
       {tab === 'announcements' && (
           <section id="invigilator-notices" tabIndex={-1} aria-labelledby="invigilator-notices-title"
-            className={`min-w-0 scroll-mt-4 rounded-2xl border p-4 sm:p-5 ${currentAnnouncements.length ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
-            <h2 id="invigilator-notices-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
-              <Bell size={19} className="text-amber-800" aria-hidden="true" />考務公告
-            </h2>
-            {currentAnnouncements.length ? (
-              <ul className="mt-3 space-y-2">
-                {currentAnnouncements.map((item) => (
-                  <li key={item.id} className="rounded-xl border border-amber-200 bg-white p-3">
-                    <p className="text-xs font-bold text-amber-950">{announcementLabels[item.type]}{item.subject ? ` · ${item.subject}` : ''}</p>
-                    <h3 className="mt-1 text-sm font-black text-slate-950 [overflow-wrap:anywhere]">{item.title}</h3>
-                    <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800 [overflow-wrap:anywhere]">{item.content}</p>
+            className="wb-panel space-y-4">
+            <h2 id="invigilator-notices-title" className="wb-section-title">本考場的公告</h2>
+            {announcements.length ? (
+              <ul className="space-y-3">
+                {announcements.map((item) => (
+                  <li key={item.id} className={`rounded-2xl border p-4 sm:p-5 ${item.type === 'emergency' ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}>
+                    <p className="inline-block rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-800 [overflow-wrap:anywhere]">{announcementLabels[item.type]}{item.subject ? ` · ${item.subject}` : ''}</p>
+                    <h3 className="mt-2 text-lg font-black text-slate-950 [overflow-wrap:anywhere]">{item.title}</h3>
+                    <p className="mt-1 whitespace-pre-wrap text-base leading-7 text-slate-800 [overflow-wrap:anywhere]">{item.content}</p>
                   </li>
                 ))}
               </ul>
-            ) : <p className="mt-1 text-sm text-slate-700">目前沒有考務公告。</p>}
+            ) : <div className="wb-empty flex items-center gap-3"><Inbox size={22} className="shrink-0 text-teal-800" aria-hidden="true" />目前沒有考務公告。</div>}
           </section>
       )}
       {tab === 'issues' && (
-          <section id="invigilator-issue-panel" tabIndex={-1} aria-labelledby="invigilator-issue-title" className="min-w-0 scroll-mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-            <div>
-              <h2 id="invigilator-issue-title" className="flex items-center gap-2 text-lg font-black text-slate-950"><Send size={19} className="text-teal-800" aria-hidden="true" />考場通報</h2>
-              <p className="mt-1 text-sm text-slate-700">選擇常用情況或直接填寫通報內容。</p>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {PRESET_ISSUES.map((preset) => {
-                const Icon = preset.icon;
-                const isSelected = selectedPresetId === preset.id;
-                return (
-                  <button key={preset.id} type="button" onClick={() => handlePickPreset(preset)} aria-pressed={isSelected} disabled={isSubmittingIssue}
-                    className={`min-h-16 min-w-0 rounded-lg border p-2 text-left focus-visible:outline-2 focus-visible:outline-teal-700 ${preset.color} ${isSelected ? 'ring-2 ring-teal-800 ring-inset' : ''}`}>
-                    <span className="flex items-start gap-1.5 text-xs font-black sm:text-sm">
-                      <Icon size={16} className={`shrink-0 ${preset.iconColor}`} aria-hidden="true" />{preset.title}
-                    </span>
-                    <span className="mt-1 block text-[11px] font-bold">{preset.subtitle}</span>
+          <div className="wb-split">
+            <section id="invigilator-issue-panel" tabIndex={-1} aria-labelledby="invigilator-issue-title" className="wb-panel space-y-4">
+              <div>
+                <h2 id="invigilator-issue-title" className="wb-section-title">新增通報</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-700">選擇下方情況可帶入文字，也可以直接填寫。</p>
+              </div>
+              <div className="grid gap-2 min-[390px]:grid-cols-2">
+                {PRESET_ISSUES.map((preset) => {
+                  const Icon = preset.icon;
+                  const isSelected = selectedPresetId === preset.id;
+                  return (
+                    <button key={preset.id} type="button" onClick={() => handlePickPreset(preset)} aria-pressed={isSelected} disabled={isSubmittingIssue}
+                      className={`min-h-20 min-w-0 rounded-xl border p-3 text-left focus-visible:outline-2 focus-visible:outline-teal-700 ${preset.color} ${isSelected ? 'ring-2 ring-teal-800 ring-inset' : ''}`}>
+                      <span className="flex items-center gap-1.5 text-sm font-black">
+                        <Icon size={16} className={`shrink-0 ${preset.iconColor}`} aria-hidden="true" />{preset.title}
+                        {isSelected && <Check size={16} className="ml-auto shrink-0" aria-hidden="true" />}
+                      </span>
+                      <span className="mt-1 block text-xs leading-5">{preset.subtitle}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <form onSubmit={handleSubmitIssue} className="space-y-2">
+                {selectedPresetId && (
+                  <button type="button" disabled={isSubmittingIssue} onClick={() => {
+                    setSelectedPresetId('');
+                    setIssueType('general');
+                    setIssueError('');
+                  }} className="min-h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                    改為一般通報
                   </button>
-                );
-              })}
-            </div>
-            <form onSubmit={handleSubmitIssue} className="space-y-2">
-              <label htmlFor="invigilator-issue" className="block text-sm font-bold text-slate-800">通報內容</label>
-              <textarea id="invigilator-issue" rows={3} value={issueContent} disabled={isSubmittingIssue}
-                onChange={(event) => setIssueContent(event.target.value)}
-                className="block w-full rounded-xl border border-slate-300 bg-white p-3 text-sm leading-6 text-slate-950"
-                placeholder="描述考場狀況與需要的協助" />
-              <button type="submit" disabled={isSubmittingIssue || !issueContent.trim()} className={`${primary} w-full`}>
-                <Send size={17} aria-hidden="true" />{isSubmittingIssue ? '正在送出通報…' : '送出通報'}
-              </button>
-              {issueError && <p role="alert" className="rounded-lg bg-rose-100 p-2 text-sm font-bold text-rose-950">{issueError}</p>}
-              {issueSuccessMessage && <p role="status" className="rounded-lg bg-teal-100 p-2 text-sm font-bold text-teal-950">通報已送出，可在下方查看處理進度。</p>}
-            </form>
+                )}
+                <label htmlFor="invigilator-issue" className="block text-sm font-bold text-slate-800">通報內容</label>
+                <textarea id="invigilator-issue" rows={3} value={issueContent} disabled={isSubmittingIssue}
+                  onChange={(event) => {
+                    setIssueContent(event.target.value);
+                    setIssueSent(false);
+                    setIssueError('');
+                  }}
+                  className="block w-full rounded-xl border border-slate-300 bg-white p-3 text-sm leading-6 text-slate-950"
+                  placeholder="描述考場狀況與需要的協助" />
+                <button type="submit" disabled={isSubmittingIssue || !issueContent.trim()} className={`${primary} wb-status-button w-full flex-wrap py-2`}>
+                  <Send size={17} aria-hidden="true" />{issueType === 'urgent' ? '送出緊急通報' : '送出通報'}
+                  {(isSubmittingIssue || issueSent || issueError) && (
+                    <span className="wb-button-status" data-tone={issueSent ? 'success' : issueError ? 'error' : undefined}>
+                      {isSubmittingIssue ? '送出中' : issueSent ? '已送出' : '送出失敗'}
+                    </span>
+                  )}
+                </button>
+                {issueError && <p role="alert" className="rounded-lg bg-rose-100 p-2 text-sm font-bold text-rose-950">{issueError}</p>}
+                <p role="status" className="sr-only">{isSubmittingIssue ? '正在送出通報' : issueSent ? '通報已送出，請在處理進度查看回覆。' : ''}</p>
+              </form>
+            </section>
 
-            <div className="border-t border-slate-200 pt-3">
-              <h3 className="text-sm font-black text-slate-950">教務回覆與處理進度（{classroomIssues.length}）</h3>
+            <section className="wb-panel space-y-4" aria-labelledby="wb-issue-progress">
+              <h2 id="wb-issue-progress" className="wb-section-title">處理進度 <span className="text-sm text-slate-600">（{classroomIssues.length} 則）</span></h2>
               {classroomIssues.length ? (
-                <ul className="mt-2 max-h-80 space-y-2 overflow-y-auto">
+                <ul className="space-y-3">
                   {classroomIssues.map((issue) => (
                     <li key={issue.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-xs font-bold text-teal-950">
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${issue.status === 'resolved' ? 'bg-emerald-100 text-emerald-950' : issue.status === 'processing' ? 'bg-sky-100 text-sky-950' : 'bg-amber-100 text-amber-950'}`}>
                         {issue.status === 'resolved' ? '已處理完成' : issue.status === 'processing' ? '處理中' : '待教務處理'}
                       </span>
                       <p className="mt-1 whitespace-pre-wrap text-sm text-slate-950 [overflow-wrap:anywhere]">{issue.content}</p>
@@ -605,15 +627,10 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
                     </li>
                   ))}
                 </ul>
-              ) : <p className="mt-1 text-sm text-slate-700">目前沒有考場通報。</p>}
-            </div>
-          </section>
+              ) : <p className="wb-empty">目前沒有考場通報。送出後，可在這裡查看進度與教務處回覆。</p>}
+            </section>
+          </div>
       )}
-      {(tab === 'assignments' || tab === 'corrections') && (extraPage ?? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-          {tab === 'corrections' ? '此帳號尚未取得試題更正送審權限。' : '此帳號沒有個人的監考安排。'}
-        </p>
-      ))}
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { FilePenLine } from 'lucide-react';
+import { FilePenLine, Send } from 'lucide-react';
 import { examSync } from '../services/examSync';
 import type { CorrectionDraft, CorrectionProposal, ExamAuthorAssignment, SystemData } from '../types/exam';
 import { gradeLabel } from '../types/grades';
@@ -50,7 +50,7 @@ export function CorrectionSubmission({ data, teacherId, assignments }: {
   const [content, setContent] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [sent, setSent] = useState(false);
   const assignment = assignments.find((item) => assignmentKey(item) === selection) ??
     (assignments.length === 1 ? assignments[0] : undefined);
   const proposals = data.correctionProposals?.filter((item) => item.teacherId === teacherId) ?? [];
@@ -69,12 +69,12 @@ export function CorrectionSubmission({ data, teacherId, assignments }: {
     })) return;
     setBusy(true);
     setError('');
-    setNotice('');
+    setSent(false);
     try {
       await examSync.submitCorrection(draft);
       setTitle('');
       setContent('');
-      setNotice('已送交教務審核。');
+      setSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : '送審失敗，請稍後再試。');
     } finally {
@@ -83,48 +83,55 @@ export function CorrectionSubmission({ data, teacherId, assignments }: {
   }
 
   return (
-    <section aria-labelledby="correction-submission-title" className={panel}>
+    <div className="wb-split">
       {confirmationDialog}
-      <h2 id="correction-submission-title" className="flex items-center gap-2 text-xl font-black text-slate-950">
-        <FilePenLine size={22} className="text-teal-800" aria-hidden="true" />試題更正送審
-      </h2>
-      <p className="mt-1 text-sm leading-6 text-slate-700">選擇教務處指派的科目與年級。核准後會顯示在該年級所有考場；考科僅為標籤，不依目前考科篩選，持續至教務撤回或設定的顯示結束時間。</p>
-      <div className="mt-4 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <form onSubmit={submit} className="min-w-0 space-y-3">
-          <label className="block min-w-0 text-sm font-bold text-slate-800">出題科目與年級
-            <select required disabled={busy} className={field} value={assignment ? assignmentKey(assignment) : ''} onChange={(e) => setSelection(e.target.value)}>
-              <option value="" disabled>選擇出題科目與年級</option>
-              {assignments.map((item) => (
-                <option key={assignmentKey(item)} value={assignmentKey(item)}>{item.subject} · {gradeLabel(data.config, item.grade)}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm font-bold text-slate-800">更正標題
-            <input required maxLength={150} disabled={busy} className={field} value={title} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          <label className="block text-sm font-bold text-slate-800">更正內容
-            <textarea required rows={4} maxLength={3000} disabled={busy} className={field} value={content} onChange={(e) => setContent(e.target.value)} placeholder="請寫明題號及更正後的內容" />
-          </label>
-          <button type="submit" disabled={busy || !assignment || !title.trim() || !content.trim()} className={primary}>
-            {busy ? '送審中…' : '預覽並送審'}
-          </button>
-          {error && <p role="alert" className="text-sm font-bold text-rose-800">{error}</p>}
-          {notice && <p role="status" className="text-sm font-bold text-teal-800">{notice}</p>}
-        </form>
-        <section aria-label="我的送審紀錄" className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-          <h3 className="text-sm font-black text-slate-950">我的送審紀錄</h3>
-          {proposals.length > 0 ? (
-            <ul className="mt-3 max-h-96 space-y-2 overflow-y-auto">
-              {proposals.map((item) => (
-                <li key={item.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                  <CorrectionDetails item={item} audience={audienceLabel(item.targetAudience)} />
-                </li>
-              ))}
-            </ul>
-          ) : <p className="mt-2 text-sm text-slate-700">目前沒有送審紀錄。</p>}
-        </section>
-      </div>
-    </section>
+      <form onSubmit={submit} onChange={() => { setSent(false); setError(''); }}
+        aria-labelledby="correction-submission-title" className="wb-panel space-y-4">
+        <h2 id="correction-submission-title" className="wb-section-title">填寫更正內容</h2>
+        <p className="text-sm leading-6 text-slate-700">選擇科目與年級，填寫題號和更正內容。</p>
+        <label className="block min-w-0 text-sm font-bold text-slate-800">出題科目與年級
+          <select required disabled={busy} className={field} value={assignment ? assignmentKey(assignment) : ''} onChange={(e) => setSelection(e.target.value)}>
+            <option value="" disabled>選擇出題科目與年級</option>
+            {assignments.map((item) => (
+              <option key={assignmentKey(item)} value={assignmentKey(item)}>{item.subject} · {gradeLabel(data.config, item.grade)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm font-bold text-slate-800">更正標題
+          <input required maxLength={150} disabled={busy} className={field} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如 第 5 題選項更正" />
+        </label>
+        <label className="block text-sm font-bold text-slate-800">更正內容
+          <textarea required rows={4} maxLength={3000} disabled={busy} className={field} value={content} onChange={(e) => setContent(e.target.value)} placeholder="請寫明題號及更正後的內容" />
+        </label>
+        <p className="wb-empty">
+          {assignment ? `核准後，${audienceLabel(`grade_${assignment.grade}`)}都會看到更正，直到公告結束或教務撤回。` : '選擇年級後即可確認公告對象。'}
+        </p>
+        <button type="submit" disabled={busy || !assignment || !title.trim() || !content.trim()}
+          className={`${primary} wb-status-button inline-flex w-full flex-wrap items-center justify-center gap-2 py-2`}>
+          <Send size={17} aria-hidden="true" />
+          預覽並送審
+          {(busy || sent || error) && (
+            <span className="wb-button-status" data-tone={sent ? 'success' : error ? 'error' : undefined}>
+              {busy ? '送審中' : sent ? '已送審' : '送審失敗'}
+            </span>
+          )}
+        </button>
+        {error && <p role="alert" className="text-sm font-bold text-rose-800">{error}</p>}
+        <p role="status" className="sr-only">{busy ? '正在送審' : sent ? '已送交教務審核' : ''}</p>
+      </form>
+      <section aria-labelledby="wb-correction-history" className="wb-panel space-y-4">
+        <h2 id="wb-correction-history" className="wb-section-title">我的送審紀錄 <span className="text-sm text-slate-600">（{proposals.length} 則）</span></h2>
+        {proposals.length > 0 ? (
+          <ul className="space-y-3">
+            {proposals.map((item) => (
+              <li key={item.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                <CorrectionDetails item={item} audience={audienceLabel(item.targetAudience)} />
+              </li>
+            ))}
+          </ul>
+        ) : <p className="wb-empty">目前沒有送審紀錄。送出後，可在這裡查看教務審核結果。</p>}
+      </section>
+    </div>
   );
 }
 
