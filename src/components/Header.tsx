@@ -141,20 +141,20 @@ export function Header({
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-white/10 bg-[#10243d] text-white shadow-sm">
+    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white text-slate-950 shadow-sm">
       <div className="relative mx-auto grid max-w-[1720px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 px-3 sm:gap-x-4 sm:px-6 lg:px-8">
         <a
           href={VIEW_PATHS.home}
           onClick={(event) => navigate(event, 'home')}
           className={`col-start-1 row-start-1 flex min-h-14 min-w-0 items-center gap-2 rounded-xl sm:min-h-16 sm:gap-3 ${focusStyle}`}
         >
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-teal-200 text-[#10243d] sm:size-10">
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-teal-100 text-teal-800 sm:size-10">
             <GraduationCap size={22} aria-hidden="true" />
           </span>
           <span className="min-w-0">
             <span className="block truncate text-sm font-black tracking-tight min-[400px]:hidden">段考考務系統</span>
             <span className="hidden truncate text-sm font-black tracking-tight min-[400px]:block sm:text-base">段考考務即時管理系統</span>
-            <span aria-hidden="true" className="hidden text-[10px] font-bold tracking-widest text-teal-200/90 lg:block">考場、點名與教務管理中心</span>
+            <span aria-hidden="true" className="hidden text-[10px] font-bold tracking-widest text-slate-500 lg:block">考場、點名與教務管理中心</span>
           </span>
         </a>
 
@@ -175,9 +175,9 @@ export function Header({
               aria-expanded={menuVisible}
               aria-controls="account-panel"
               onClick={() => setIsMenuOpen((open) => !open)}
-              className={`inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-2.5 text-xs font-bold text-white hover:bg-white/10 aria-expanded:border-teal-300/60 aria-expanded:bg-white/10 sm:px-3 sm:text-sm ${focusStyle}`}
+              className={`inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-800 hover:bg-slate-50 aria-expanded:border-teal-300 aria-expanded:bg-teal-50 sm:px-3 sm:text-sm ${focusStyle}`}
             >
-              <RoleIcon size={17} className="shrink-0 text-teal-200" aria-hidden="true" />
+              <RoleIcon size={17} className="shrink-0 text-teal-800" aria-hidden="true" />
               <span>{roleLabel}</span>
               <ChevronDown size={15} className={menuVisible ? 'rotate-180' : undefined} aria-hidden="true" />
             </button>
@@ -186,7 +186,7 @@ export function Header({
               href={VIEW_PATHS.login}
               aria-current={activeView === 'login' ? 'page' : undefined}
               onClick={(event) => navigate(event, 'login')}
-              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-teal-200 px-3 text-xs font-black text-[#10243d] hover:bg-teal-100 sm:px-4 sm:text-sm ${focusStyle}`}
+              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-teal-800 px-3 text-xs font-black text-white hover:bg-teal-900 sm:px-4 sm:text-sm ${focusStyle}`}
             >
               <KeyRound size={16} aria-hidden="true" />登入
             </a>
@@ -198,12 +198,12 @@ export function Header({
               id="account-panel"
               className="absolute inset-x-3 top-full z-50 mt-2 flex max-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-xl sm:inset-x-auto sm:right-6 sm:w-96 md:right-0 md:mt-4 md:max-h-[calc(100dvh-6rem)]"
             >
-              <div className="attendance-banner flex shrink-0 items-center gap-3 px-4 py-3 text-white">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/10 text-teal-200">
+              <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-teal-50 px-4 py-3 text-slate-950">
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-teal-800">
                   <RoleIcon size={20} aria-hidden="true" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-teal-200">{roleLabel}</p>
+                  <p className="text-xs font-bold text-teal-800">{roleLabel}</p>
                   <p className="mt-0.5 truncate text-sm font-black" title={loggedInUsername}>{loggedInUsername || '已登入'}</p>
                 </div>
                 <button
@@ -213,7 +213,7 @@ export function Header({
                     triggerRef.current?.focus();
                   }}
                   aria-label="關閉帳號選單"
-                  className={`grid size-10 shrink-0 cursor-pointer place-items-center rounded-xl hover:bg-white/10 ${focusStyle}`}
+                  className={`grid size-10 shrink-0 cursor-pointer place-items-center rounded-xl text-slate-700 hover:bg-white ${focusStyle}`}
                 >
                   <X size={18} aria-hidden="true" />
                 </button>
