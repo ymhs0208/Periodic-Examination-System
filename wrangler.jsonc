@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "exam-operations",
+  "main": "worker/worker.ts",
+  "compatibility_date": "2026-11-07",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [{ "name": "EXAM", "class_name": "ExamRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ExamRoom"] }]
+}

@@ -1,0 +1,124 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --bg-canvas: #f4f6fb;
+    --bg-surface: #ffffff;
+    --border-subtle: #e2e8f0;
+    --primary-royal: #1d4ed8;
+    scroll-padding-top: 7.25rem;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-canvas);
+    color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .font-mono,
+  [class*="tabular-nums"] {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (min-width: 768px) {
+  :root {
+    scroll-padding-top: 4.5rem;
+  }
+}
+
+/* Use a two-tone ring so keyboard focus is visible on both light and dark surfaces. */
+:is(a[href], button, input, select, textarea, summary, [tabindex="0"]):focus-visible {
+  outline: 2px solid #07584f;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.skip-to-main {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 60;
+  transform: translateY(-200%);
+  border-radius: 0.5rem;
+  background: #10243d;
+  color: #fff;
+  padding: 0.65rem 1rem;
+  font-weight: 700;
+}
+
+.skip-to-main:focus {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Subtle custom scrollbars for dense data panels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  header,
+  footer,
+  .no-print {
+    display: none !important;
+  }
+
+  .print-report-root {
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+}
+
+.attendance-banner {
+  background: linear-gradient(118deg, #10243d 8%, #15394d 62%, #135c5c 100%);
+}
+
+.attendance-banner-pattern {
+  background-image:
+    radial-gradient(circle at 80% 25%, #6ee7cf33, transparent 65%),
+    linear-gradient(90deg, #b7f9eb20 1px, transparent 1px),
+    linear-gradient(#b7f9eb20 1px, transparent 1px);
+  background-size: auto, 36px 36px, 36px 36px;
+  mask-image: linear-gradient(90deg, transparent, black 70%);
+}
