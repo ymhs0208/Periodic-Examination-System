@@ -16,12 +16,16 @@ import type { AuditLogPage } from '../types/audit';
 import type { ExamImportKind, ExamImportPreview } from '../types/examImports';
 
 export type SyncEventHandler = (event: string, payload: any) => void;
+let reauthenticationHandler: (() => Promise<boolean>) | null = null;
+export function setReauthenticationHandler(handler: (() => Promise<boolean>) | null) { reauthenticationHandler = handler; }
+
 export type LiveConnection = 'connecting' | 'connected' | 'reconnecting' | 'offline';
 type ApiReply<T> = { success: boolean; data?: T; error?: string };
 const REQUEST_TIMEOUT = 20_000;
 
 class ExamSyncService {
   private ws: WebSocket | null = null;
+  private reconnectAttempts = 0;
   private subscribers: Set<SyncEventHandler> = new Set();
   private reconnectTimer: any = null;
   private audioCtx: AudioContext | null = null;
@@ -153,6 +157,7 @@ class ExamSyncService {
           if (evType) {
             this.notifySubscribers(evType, payload);
             if (evType === 'INIT_STATE') {
+              this.reconnectAttempts = 0;
               window.clearTimeout(initialSnapshotTimer);
               this.notifySubscribers('SESSION_UPDATED', session);
               this.notifySubscribers('LIVE_CONNECTION', 'connected');
@@ -188,10 +193,10 @@ class ExamSyncService {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connectWebSocket('reconnecting');
-    }, 3000);
+    }, Math.min(60000, 1000 * 2 ** Math.min(this.reconnectAttempts++, 6)) * (0.5 + Math.random() * 0.5));
   }
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<ApiReply<T>> {
+  private async request<T>(path: string, options: RequestInit = {}, retried = false): Promise<ApiReply<T>> {
     const method = options.method ?? 'GET';
     const tracked = path !== '/api/exam/state' && path !== '/api/auth/session' && !path.endsWith('/read');
     const id = ++this.requestId;
@@ -207,8 +212,19 @@ class ExamSyncService {
     if (tracked) this.notifySubscribers('REQUEST_STARTED', { id, reading: method === 'GET' });
     try {
       const response = await fetch(path, { ...options, signal: controller.signal });
+      if (response.status === 428 && !retried && reauthenticationHandler) {
+        window.clearTimeout(timeout);
+        const verified = await reauthenticationHandler();
+        if (!verified) return { success: false, error: '已取消身分驗證；原操作尚未執行' };
+        if (options.signal?.aborted) return { success: false, error: '原操作已取消，請重新操作' };
+        return this.request<T>(path, options, true);
+      }
       const result = await response.json() as ApiReply<T>;
       if (typeof result?.success !== 'boolean') throw new Error('Invalid API response');
+      if (response.ok && result.success && method !== 'GET' && path.startsWith('/api/exam/') && !path.endsWith('/read')) {
+        try { this.notifySubscribers('INIT_STATE', await this.fetchState()); }
+        catch { this.notifySubscribers('LIVE_CONNECTION', navigator.onLine ? 'reconnecting' : 'offline'); }
+      }
       return response.ok ? result : { success: false, error: result.error };
     } catch (error) {
       if (options.signal?.aborted) throw error;
@@ -243,6 +259,7 @@ class ExamSyncService {
     classId: string;
     periodId: string;
     expectedPeriod: Pick<ExamPeriod, 'date' | 'startTime' | 'endTime' | 'subject'>;
+    expectedLastUpdated: string | null;
     expectedCount: number;
     presentCount: number;
     absentCount: number;

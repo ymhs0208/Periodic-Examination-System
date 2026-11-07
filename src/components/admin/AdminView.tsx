@@ -1,3 +1,5 @@
+import { parseDelimited } from '../../services/parseDelimited';
+import { validTeacherPassword, MIN_TEACHER_PASSWORD_LENGTH } from '../../types/exam';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
@@ -37,7 +39,7 @@ import { AdminSettingsNavigation, type AdminSettingsPage } from './AdminSettings
 import { AdminAccountsSettings } from './AdminAccountsSettings';
 import { AuditLogView } from './AuditLogView';
 import { ExamPeriodSelect, useExamClock } from '../ExamPeriodSelect';
-import { dataForPeriod, periodLabel, preferredPeriod, reportingPeriods, scheduledExamSubjects } from '../../types/examSchedule';
+import { dataForPeriod, periodLabel, preferredPeriod, reportingPeriods, scheduledExamSubjects, invigilatorForPeriod, examPeriods, periodApplies } from '../../types/examSchedule';
 import { InvigilatorAssignments } from './InvigilatorAssignments';
 import { CorrectionReview } from '../CorrectionWorkflow';
 import { useActionConfirmation } from '../useActionConfirmation';
@@ -142,6 +144,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(
     data.issues[0]?.id || null
   );
+  const [issueClassFilter, setIssueClassFilter] = useState('');
   const [isReplying, setIsReplying] = useState<boolean>(false);
   const [replyFeedback, setReplyFeedback] = useState<{ issueId: string; error: boolean; text: string }>();
 
@@ -149,7 +152,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [requestedGradeFilter, setGradeFilter] = useState('all');
   const gradeFilter = validGradeFilter(requestedGradeFilter);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [matrixDisplayMode, setMatrixDisplayMode] = useState<'grid' | 'table'>('grid');
+  const [matrixDisplayMode, setMatrixDisplayMode] = useState<'grid' | 'table'>('table');
   const [isAttendanceWallFullscreen, setIsAttendanceWallFullscreen] = useState<boolean>(false);
 
   useEffect(() => {
@@ -165,12 +168,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAttendanceWallFullscreen]);
 
+  const [fullscreenNote, setFullscreenNote] = useState('');
+  const [wallPage, setWallPage] = useState(0);
+  useEffect(() => {
+    const changed = () => { if (!document.fullscreenElement) setIsAttendanceWallFullscreen(false); };
+    document.addEventListener('fullscreenchange', changed);
+    return () => document.removeEventListener('fullscreenchange', changed);
+  }, []);
+  useEffect(() => { setWallPage(0); }, [gradeFilter, searchQuery, matrixDisplayMode, selectedPeriod?.id]);
   const toggleAttendanceWallFullscreen = () => {
     const next = !isAttendanceWallFullscreen;
     setIsAttendanceWallFullscreen(next);
     if (next) {
       if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {});
+        document.documentElement.requestFullscreen().catch(() => setFullscreenNote('瀏覽器未允許全螢幕，目前為頁內放大模式。'));
       }
     } else {
       if (document.fullscreenElement && document.exitFullscreen) {
@@ -182,6 +193,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Settings State (Exam Config + Classroom/Invigilator Config)
   const [configForm, setConfigForm] = useState<ExamConfig>(sourceData.config);
   const previousExamConfig = React.useRef(sourceData.config);
+  const configDirty = useRef(false);
+  const [configConflict, setConfigConflict] = useState(false);
+  const updateConfigDraft = (next: ExamConfig) => { configDirty.current = true; setConfigSaved(false); setConfigForm(next); };
   const [configSaved, setConfigSaved] = useState<boolean>(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [configSaveError, setConfigSaveError] = useState('');
@@ -190,6 +204,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const teachersList: TeacherAccount[] = data.teachers || [];
   const [teacherSearch, setTeacherSearch] = useState<string>('');
   const [teacherAssignFilter, setTeacherAssignFilter] = useState<'all' | 'assigned' | 'unassigned'>('all');
+
+  const teacherSlots = (teacher: TeacherAccount) => sourceData.classrooms.flatMap((room) =>
+    examPeriods(sourceData.config).filter((period) => periodApplies(period, room) && invigilatorForPeriod(room, period.id, teachersList)?.id === teacher.id)
+      .map((period) => `${room.className} · ${periodLabel(period)}`));
+  const hasAssignment = (teacher: TeacherAccount) => teacherSlots(teacher).length > 0;
+  const visibleTeachers = teachersList.filter((teacher) =>
+    (teacherAssignFilter === 'all' || (teacherAssignFilter === 'assigned') === hasAssignment(teacher)) &&
+    (!teacherSearch.trim() || [teacher.name, teacher.username, teacher.department ?? ''].some((value) => value.toLowerCase().includes(teacherSearch.trim().toLowerCase()))));
 
   // Single Teacher Add/Edit Form
   const teacherDialog = useRef<HTMLDialogElement>(null);
@@ -230,6 +252,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
     setTeacherFormError('');
     if (!tchNameForm.trim() || !tchUserForm.trim() || (!editingTeacherId && !tchPassForm.trim())) {
       setTeacherFormError('請完整填寫教師姓名、獨立登入帳號與登入密碼');
+      return;
+    }
+    if ((!editingTeacherId || tchPassForm.trim()) && !validTeacherPassword(tchPassForm)) {
+      setTeacherFormError('新增或重設的密碼須為 12 至 256 字元，且不可過於簡單。');
       return;
     }
     const examAuthorAssignments = tchAuthorAssignments.map((item) => ({ ...item, subject: item.subject.trim() }));
@@ -331,58 +357,49 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   const parseTeacherCSVLines = (rawText: string): TeacherAccountInput[] => {
-    const lines = rawText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
+    const rows = parseDelimited(rawText);
     const parsed: TeacherAccountInput[] = [];
-
-    lines.forEach((line, idx) => {
-      // Skip header row if detected
-      if (
-        idx === 0 &&
-        (line.includes('姓名') || line.toLowerCase().includes('username') || line.includes('帳號'))
-      ) {
-        return;
-      }
-      const cols = line.split(/[,\t，]/).map((c) => c.replace(/^["']|["']$/g, '').trim());
-      if (cols.length >= 2) {
-        const [name, username, password, department, assignedClassId] = cols;
-        if (name && username) {
-          parsed.push({
-            name,
-            username,
-            password,
-            department: department || '專任教師',
-            assignedClassId: assignedClassId || ''
-          });
-        }
-      }
+    const seen = new Set<string>();
+    rows.forEach((cols, index) => {
+      if (!index && (cols[0].includes('姓名') || cols[1]?.toLowerCase().includes('username') || cols[1]?.includes('帳號'))) return;
+      const [name, username, password, department, assignedClassId] = cols;
+      if (cols.length < 3 || cols.length > 5 || !name || !username || !password) throw new Error(`第 ${index + 1} 列：請填妥姓名、帳號、密碼，並確認為 3–5 欄。`);
+      if (seen.has(username)) throw new Error(`第 ${index + 1} 列：帳號 ${username} 重複。`);
+      if (assignedClassId && !sourceData.classrooms.some((room) => room.classId === assignedClassId)) throw new Error(`第 ${index + 1} 列：找不到考場 ${assignedClassId}。`);
+      seen.add(username); parsed.push({ name, username, password, department: department || '專任教師', assignedClassId: assignedClassId || '' });
     });
+    if (parsed.length > 50) throw new Error('每次最多 50 筆；請分批使用合併模式。覆蓋模式不可分批，以免移除先前批次。');
     return parsed;
   };
 
-  const confirmTeacherImport = (count: number, fileName?: string) => confirmAction({
+  const confirmTeacherImport = (parsed: TeacherAccountInput[], fileName?: string) => confirmAction({
     title: '確認匯入教師名冊',
     description: batchImportMode === 'replace'
       ? '現有教師名冊將以這次匯入的資料取代。'
       : '符合相同登入帳號的教師資料將更新。',
     facts: [
       { label: '匯入方式', value: batchImportMode === 'replace' ? '完全取代' : '合併更新' },
-      { label: '資料筆數', value: `${count} 筆` },
-      { label: '來源', value: fileName ?? '貼上的文字' }
+      { label: '資料筆數', value: `${parsed.length} 筆（每次上限 50）` },
+      { label: '來源', value: fileName ?? '貼上或選檔的文字' },
+      { label: '逐列預覽（不顯示密碼）', value: parsed.map((row, i) => `${i + 1}. ${teachersList.some((t) => t.username === row.username) ? '更新' : '新增'}：${row.name}／${row.username}／${row.department}／${row.assignedClassId || '沿用原預設考場或不指派'}`).join('\n') },
+      ...(batchImportMode === 'replace' ? [{ label: '覆蓋影響', value: `將移除未列入的 ${teachersList.filter((t) => !parsed.some((r) => r.username === t.username)).length} 位教師；相同帳號保留 ID 與出題／分節監考指派。移除仍有指派者會被阻擋。所有匯入帳號密碼會更新。` }] : [])
     ],
     confirmLabel: '確認匯入',
     danger: batchImportMode === 'replace'
   });
 
   const importTeacherText = async (text: string, fileName?: string) => {
-    const parsed = parseTeacherCSVLines(text);
+    let parsed: TeacherAccountInput[];
+    try { parsed = parseTeacherCSVLines(text); } catch (error) { showTempTeacherMsg('err', error instanceof Error ? error.message : '名單格式錯誤'); return; }
     if (parsed.length === 0) {
       showTempTeacherMsg('err', '未解析到有效資料，請確認格式為：教師姓名,登入帳號,登入密碼,科別,指派班級(選填)');
       return;
     }
-    if (!await confirmTeacherImport(parsed.length, fileName)) return;
+    if (parsed.some(teacher => !validTeacherPassword(teacher.password))) {
+      showTempTeacherMsg('err', '每位教師的密碼須為 12 至 256 字元，且不可過於簡單；請檢查後重新匯入。');
+      return;
+    }
+    if (!await confirmTeacherImport(parsed, fileName)) return;
     setTeacherPending(`正在匯入 ${parsed.length} 位教師帳號…`);
     setTeacherFeedback(null);
     try {
@@ -408,7 +425,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
     try {
       const text = await file.text();
       setTeacherPending('');
-      await importTeacherText(text, file.name);
+      setBatchImportText(text); setShowBatchImportBox(true);
+      showTempTeacherMsg('ok', `已讀取 ${file.name}，請確認模式，再按預覽並匯入。`);
     } catch {
       showTempTeacherMsg('err', '讀取檔案失敗，請確認為 UTF-8 編碼之 CSV 或 TXT 檔');
     } finally {
@@ -447,7 +465,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
     const { gradeLabels: _previousLabels, periods: _previousPeriods, ...previous } = previousExamConfig.current;
     const { gradeLabels: _currentLabels, periods: _currentPeriods, ...current } = sourceData.config;
     previousExamConfig.current = sourceData.config;
-    if (JSON.stringify(previous) !== JSON.stringify(current)) setConfigForm(current);
+    if (JSON.stringify(previous) !== JSON.stringify(current)) {
+      if (configDirty.current) { setConfigConflict(true); setConfigSaved(false); }
+      else setConfigForm(current);
+    }
   }, [sourceData.config]);
 
   // KPIs
@@ -495,8 +516,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
     };
     if (!await confirmAction({
       title: '確認發布考務公告',
+      description: '考科僅為標籤，不限制接收對象；時間延長僅發布通知，不會修改考程。需延後結束時間時，請至考務設定 → 考程調整。',
       facts: [
-        { label: '發布對象', value: getTargetAudienceLabel(announcement.targetAudience) },
+        { label: '發布對象', value: `${getTargetAudienceLabel(announcement.targetAudience)}（${sourceData.classrooms.filter((room) => announcement.targetAudience === 'all' || announcement.targetAudience === room.classId || announcement.targetAudience === `grade_${room.grade}`).map((room) => room.className).join('、') || '無符合班級'}）` },
         { label: '考科', value: announcement.subject || '未指定' },
         { label: '公告類型', value: { correction: '試題更正', extension: '時間延長', notice: '一般提醒', emergency: '緊急公告' }[announcement.type] },
         { label: '公告標題', value: announcement.title },
@@ -523,9 +545,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
     const announcement = data.announcements.find((item) => item.id === id);
     if (!announcement || withdrawingId || !await confirmAction({
       title: '確認撤回考務公告',
+      description: '撤回後將不再顯示於接收端。若內容有誤，可先複製為新公告修正，再撤回舊公告。',
       facts: [
         { label: '公告標題', value: announcement.title },
-        { label: '發布對象', value: getTargetAudienceLabel(announcement.targetAudience) }
+        { label: '發布對象', value: `${getTargetAudienceLabel(announcement.targetAudience)}（${sourceData.classrooms.filter((room) => announcement.targetAudience === 'all' || announcement.targetAudience === room.classId || announcement.targetAudience === `grade_${room.grade}`).map((room) => room.className).join('、') || '無符合班級'}）` }
       ],
       confirmLabel: '確認撤回',
       danger: true
@@ -547,6 +570,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     const issue = data.issues.find((item) => item.id === issueId);
     if (!issue || isReplying || !await confirmAction({
       title: status === 'resolved' ? '確認結案' : '確認回覆考場通報',
+      description: '此操作只記錄處理狀態並回覆監考老師，不會自動聯絡或派遣支援人員。請確認已完成實際聯繫。',
       facts: [
         { label: '考場', value: issue.className },
         { label: '通報內容', value: issue.content },
@@ -573,6 +597,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (savingConfig) return;
+    if (configConflict) { setConfigSaveError('基本資料已有遠端變更，請先重新載入並核對再儲存。'); return; }
     setSavingConfig(true);
     setConfigSaved(false);
     setConfigSaveError('');
@@ -583,6 +608,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         examName: configForm.examName,
         rulesNotes: configForm.rulesNotes.map((rule) => rule.trim()).filter(Boolean)
       });
+      configDirty.current = false; setConfigConflict(false);
       setConfigSaved(true);
     } catch (error) {
       setConfigSaveError(error instanceof Error ? error.message : '無法儲存考務設定。');
@@ -636,16 +662,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const buildGradeStatRow = (label: string, list: typeof data.classrooms) => {
     const classCount = list.length;
-    const reportedCount = list.filter((c) => c.statusReported).length;
+    const reportedList = list.filter((c) => c.statusReported);
+    const reportedCount = reportedList.length;
     const expected = list.reduce((acc, c) => acc + (c.expectedCount || 0), 0);
-    const present = list.reduce((acc, c) => acc + (c.presentCount || 0), 0);
-    const absent = list.reduce((acc, c) => acc + (c.absentCount || 0), 0);
+    const present = reportedList.reduce((acc, c) => acc + (c.presentCount || 0), 0);
+    const absent = reportedList.reduce((acc, c) => acc + (c.absentCount || 0), 0);
     let sick = 0;
     let personal = 0;
     let official = 0;
     let bereavement = 0;
     let other = 0;
-    list.forEach((c) => {
+    reportedList.forEach((c) => {
       const counts = countAbsentReasons(c.absentStudents || []);
       sick += counts.sick;
       personal += counts.personal;
@@ -653,7 +680,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
       bereavement += counts.bereavement;
       other += counts.other;
     });
-    const rate = expected > 0 ? ((present / expected) * 100).toFixed(2) : '100.00';
+    const reportedExpected = list.filter((c) => c.statusReported).reduce((sum, c) => sum + c.expectedCount, 0);
+    const rate = reportedExpected > 0 ? ((present / reportedExpected) * 100).toFixed(2) : '—';
     return {
       label,
       classCount,
@@ -708,10 +736,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
         escapeCSV(`${attendanceData.config.startTime} - ${attendanceData.config.endTime} (${attendanceData.config.durationMinutes}分鐘)`),
         escapeCSV('清點完成進度'),
         escapeCSV(`已回報 ${totalSummaryRow.reportedCount} / ${totalSummaryRow.classCount} 班`),
-        escapeCSV('全校整體到考率'),
-        escapeCSV(`${totalSummaryRow.rate}%`)
+        escapeCSV('已回報到考率（僅已回報班級應到為分母）'),
+        escapeCSV(totalSummaryRow.rate === '—' ? '—' : `${totalSummaryRow.rate}%`)
       ].join(',')
     );
+    lines.push([escapeCSV(`明細／缺席清冊範圍：${reportGradeFilter === 'all' ? '全年級' : gradeName(Number(reportGradeFilter))}；${reportOnlyAbsent ? '僅有缺席考場' : '全部考場'}；回報覆蓋率 ${totalSummaryRow.reportedCount}/${totalSummaryRow.classCount} 班；彙總仍為全校。`)].join(','));
     lines.push('');
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -732,7 +761,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         '公假人數',
         '喪假人數',
         '其他/曠課人數',
-        '到考率(%)'
+        '已回報到考率(%)'
       ]
         .map(escapeCSV)
         .join(',')
@@ -753,7 +782,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           r.official,
           r.bereavement,
           r.other,
-          `${r.rate}%`
+          r.rate === '—' ? '—' : `${r.rate}%`
         ]
           .map(escapeCSV)
           .join(',')
@@ -776,7 +805,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         '應到人數',
         '實到人數',
         '缺席人數',
-        '到考率(%)',
+        '已回報到考率(%)',
         '病假',
         '事假',
         '公假',
@@ -792,17 +821,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
         .join(',')
     );
 
-    sortedClassrooms.forEach((c, idx) => {
+    reportFilteredClassrooms.forEach((c, idx) => {
       const absentList = c.absentStudents || [];
       const counts = countAbsentReasons(absentList);
       const absentDetailStr =
-        absentList.length > 0
+        !c.statusReported ? '待點名' : absentList.length > 0
           ? absentList
               .map((s) => `${String(s.seatNo).padStart(2, '0')}號 ${s.name || '考生'}(${s.reason || '缺考'})`)
               .join('；')
           : '全班到齊（無缺席）';
       const classRate =
-        c.expectedCount > 0 ? ((c.presentCount / c.expectedCount) * 100).toFixed(2) : '100.00';
+        c.statusReported && c.expectedCount > 0 ? ((c.presentCount / c.expectedCount) * 100).toFixed(2) : '—';
       const classIssues = data.issues.filter((i) => i.classId === c.classId);
       const hasUnresolved = classIssues.some((i) => i.status !== 'resolved');
       const issueStatusLabel =
@@ -824,9 +853,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
           c.invigilator,
           matchedTch?.username || c.invigilatorUsername || '',
           c.expectedCount,
-          c.presentCount,
-          c.absentCount,
-          `${classRate}%`,
+          c.statusReported ? c.presentCount : '—',
+          c.statusReported ? c.absentCount : '—',
+          classRate === '—' ? '—' : `${classRate}%`,
           counts.sick,
           counts.personal,
           counts.official,
@@ -866,7 +895,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         .join(',')
     );
 
-    const allSchoolAbsent = sortedClassrooms.flatMap((c) =>
+    const allSchoolAbsent = reportFilteredClassrooms.filter((c) => c.statusReported).flatMap((c) =>
       (c.absentStudents || []).map((st) => ({
         grade: c.grade,
         classId: c.classId,
@@ -901,7 +930,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         );
       });
     } else {
-      lines.push([escapeCSV('本節全校考生全勤到齊，無任何缺席考生紀錄。')].join(','));
+      lines.push([escapeCSV(totalSummaryRow.unreportedCount ? `目前無已回報缺席紀錄，仍有 ${totalSummaryRow.unreportedCount} 班待回報。` : '目前篩選範圍的已回報考場無缺席紀錄。')].join(','));
     }
     lines.push('');
 
@@ -1040,7 +1069,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       .map(escapeCSV)
       .join(',');
 
-    const allSchoolAbsent = sortedClassrooms.flatMap((c) =>
+    const allSchoolAbsent = reportFilteredClassrooms.filter((c) => c.statusReported).flatMap((c) =>
       (c.absentStudents || []).map((st) => ({
         grade: c.grade,
         classId: c.classId,
@@ -1133,8 +1162,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
         <div className="attendance-banner-pattern pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3" aria-hidden="true" />
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
-            <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-teal-200"><Building2 size={16} aria-hidden="true" />教務行政</p>
-            <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-4xl">段考考務管理中心</h1>
+            <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-teal-200"><Building2 size={16} aria-hidden="true" />教務管理中心</p>
+            <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-4xl">教務管理中心</h1>
             {examDetails.length > 0 && <p className="mt-2 text-sm text-slate-200">{examDetails.join(' · ')}</p>}
           </div>
           <div className="grid w-full grid-cols-3 gap-2 text-center sm:w-auto">
@@ -1185,10 +1214,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={exportAttendanceCSV}
+            {activeTab === 'reports' && <button type="button" onClick={exportAttendanceCSV}
               className="flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
-              <Download size={16} className="text-teal-800" aria-hidden="true" />匯出 CSV
-            </button>
+              <Download size={16} className="text-teal-800" aria-hidden="true" />匯出全校彙總＋目前篩選明細 CSV
+            </button>}
             {onLogout && (
               <button type="button" disabled={loggingOut} onClick={onLogout}
                 className="flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 text-xs font-bold text-rose-800 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-rose-700 disabled:opacity-50">
@@ -1198,6 +1227,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
           </div>
         </div>
 
+        {activeTab === 'settings' && (configConflict || configDirty.current) && <div role="status" className="mb-3 rounded-xl bg-amber-50 p-3 text-sm font-bold">
+          {configConflict ? '基本資料已由其他人更新。你的草稿未被覆蓋；請重新載入最新資料後核對。' : '基本資料有尚未儲存的變更。'}
+          <button type="button" onClick={() => { if (window.confirm('捨棄基本資料草稿並載入最新資料？')) { configDirty.current = false; setConfigConflict(false); setConfigSaved(false); setConfigForm(sourceData.config); } }} className="ml-3 underline">捨棄草稿並重新載入</button>
+        </div>}
         {isAttendanceTab && (
           <div className="no-print mb-4 rounded-2xl border border-slate-200 bg-white p-4">
             <ExamPeriodSelect periods={periods} value={chosenPeriod?.id ?? ''} onChange={setRequestedPeriodId} autoLabel="自動選擇考試節次" />
@@ -1211,192 +1244,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
         {activeTab === 'matrix' && (
           <div className="space-y-3.5">
             {/* 全螢幕「全校考場出席人數即時看板」淺色電視牆模式 (桌機零滾動 / 手機平板流暢自適應) */}
-            {isAttendanceWallFullscreen && (
-              <div className="fixed inset-0 z-50 w-screen h-screen bg-[#f4f7fb] text-slate-900 p-3 sm:p-6 flex flex-col justify-between gap-3.5 sm:gap-4 overflow-y-auto lg:overflow-hidden select-none">
-                {/* 頂部淺色指揮列 */}
-                <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4 bg-white border border-slate-200/90 rounded-2xl px-4 sm:px-5 py-3 shadow-2xs shrink-0">
-                  <div className="flex items-center gap-3 sm:gap-3.5">
-                    <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-teal-700 text-white flex items-center justify-center shrink-0">
-                      <Users className="w-5 h-5 sm:w-6 sm:h-6" />
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-bold text-slate-600">
-                        <span>{data.config.schoolName}</span>
-                        <span className="hidden sm:inline">·</span>
-                        <span className="hidden sm:inline">{data.config.academicYear}</span>
-                        <span>·</span>
-                        <span className="text-teal-800 font-black">{data.config.examName}</span>
-                      </div>
-                      <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 mt-0.5">
-                        <h2 className="text-lg sm:text-2xl lg:text-3xl font-black tracking-tight text-slate-900">
-                          考場出席人數即時看板
-                        </h2>
-                        <span className="text-xs sm:text-base font-black text-teal-800 tabular-nums">
-                          {data.config.subject}（{data.config.startTime} – {data.config.endTime}）
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 全校總計四大指標 + 退出全螢幕 */}
-                  <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full xl:w-auto justify-between xl:justify-end">
-                    <div className="flex-1 sm:flex-initial grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 sm:px-4 py-2 text-center">
-                      <div className="px-1.5 sm:px-2">
-                        <span className="text-[11px] font-bold text-slate-600 block">全校考場</span>
-                        <span className="text-base sm:text-xl font-mono font-black text-slate-900 tabular-nums">
-                          {totalClassrooms} 間
-                        </span>
-                      </div>
-                      <div className="px-1.5 sm:px-2 border-l border-slate-200">
-                        <span className="text-[11px] font-bold text-slate-600 block">全校應到</span>
-                        <span className="text-base sm:text-xl font-mono font-black text-slate-900 tabular-nums">
-                          {data.classrooms.reduce((acc, c) => acc + c.expectedCount, 0)} 人
-                        </span>
-                      </div>
-                      <div className="px-1.5 sm:px-2 sm:border-l border-slate-200">
-                        <span className="text-[11px] font-bold text-emerald-800 block">全校實到</span>
-                        <span className="text-base sm:text-xl font-mono font-black text-emerald-700 tabular-nums">
-                          {data.classrooms.reduce((acc, c) => acc + c.presentCount, 0)} 人
-                        </span>
-                      </div>
-                      <div className="px-1.5 sm:px-2 border-l border-slate-200">
-                        <span className="text-[11px] font-bold text-rose-800 block">全校缺席</span>
-                        <span className="text-base sm:text-xl font-mono font-black text-rose-700 tabular-nums">
-                          {totalAbsent} 人
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={toggleAttendanceWallFullscreen}
-                      className="h-10 sm:h-11 px-3.5 sm:px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 cursor-pointer shrink-0 transition-colors"
-                    >
-                      <Minimize2 className="w-4 h-4" />
-                      <span>退出全螢幕 (Esc)</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 中央 4x3 淺色考場矩陣 (桌機零滾動 / 手機平板自適應網格) */}
-                <div className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-3.5 lg:overflow-hidden">
-                  {data.classrooms.map((c) => {
-                    const classIssues = data.issues.filter((i) => i.classId === c.classId);
-                    const hasUnresolved = classIssues.some((i) => i.status !== 'resolved');
-                    return (
-                      <div
-                        key={c.classId}
-                        className={`rounded-2xl border p-3.5 flex flex-col justify-between overflow-hidden transition-colors bg-white ${
-                          hasUnresolved
-                            ? 'border-rose-300 ring-2 ring-rose-100'
-                            : c.absentCount > 0
-                            ? 'border-amber-300'
-                            : 'border-slate-200/90'
-                        }`}
-                      >
-                        {/* 卡片頂部：班級名稱 + 監考老師 + 點名狀態 */}
-                        <div className="flex items-start justify-between gap-2 shrink-0">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 rounded bg-teal-50 border border-teal-200 text-teal-800 font-mono font-black text-xs tabular-nums">
-                                {c.classId}
-                              </span>
-                              <h3 className="text-lg sm:text-xl font-black text-slate-900 leading-tight">
-                                {c.className}
-                              </h3>
-                            </div>
-                            <p className="text-xs font-bold text-slate-600 mt-0.5">
-                              監考：{c.invigilator}
-                            </p>
-                          </div>
-
-                          <span
-                            className={`text-[11px] font-black whitespace-nowrap ${
-                              hasUnresolved
-                                ? 'text-rose-700'
-                                : c.statusReported
-                                ? 'text-emerald-700'
-                                : 'text-amber-700'
-                            }`}
-                          >
-                            {hasUnresolved
-                              ? '有待處理狀況'
-                              : c.statusReported
-                              ? '已核對點名'
-                              : '點名回報中'}
-                          </span>
-                        </div>
-
-                        {/* 卡片中央：應到 / 實到 / 缺席 三大指標 */}
-                        <div className="grid grid-cols-3 gap-2 my-auto py-2">
-                          <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2 text-center">
-                            <span className="text-[11px] font-bold text-slate-600 block">應到</span>
-                            <span className="text-2xl sm:text-3xl font-mono font-black text-slate-900 tabular-nums">
-                              {c.expectedCount}
-                            </span>
-                          </div>
-                          <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-2 text-center">
-                            <span className="text-[11px] font-bold text-emerald-800 block">實到</span>
-                            <span className="text-2xl sm:text-3xl font-mono font-black text-emerald-700 tabular-nums">
-                              {c.presentCount}
-                            </span>
-                          </div>
-                          <div
-                            className={`rounded-xl p-2 text-center border ${
-                              c.absentCount > 0
-                                ? 'bg-rose-50 border-rose-200'
-                                : 'bg-slate-50 border-slate-200/80'
-                            }`}
-                          >
-                            <span
-                              className={`text-[11px] font-bold block ${
-                                c.absentCount > 0 ? 'text-rose-800' : 'text-slate-600'
-                              }`}
-                            >
-                              缺席
-                            </span>
-                            <span
-                              className={`text-2xl sm:text-3xl font-mono font-black tabular-nums ${
-                                c.absentCount > 0 ? 'text-rose-700' : 'text-slate-600'
-                              }`}
-                            >
-                              {c.absentCount}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* 卡片底部：缺席座號或全勤狀態 */}
-                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs shrink-0">
-                          {c.absentStudents && c.absentStudents.length > 0 ? (
-                            <div className="flex items-center gap-1.5 truncate text-rose-700 font-black">
-                              <span className="shrink-0">缺席：</span>
-                              <span className="truncate">
-                                {c.absentStudents
-                                  .map((st) => `${st.seatNo}號 ${st.name}(${st.reason || '缺考'})`)
-                                  .join('、')}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-emerald-700 font-bold flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span>全班到齊無缺席</span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* 底部狀態列 */}
-                <div className="flex items-center justify-between text-xs font-bold text-slate-600 px-1 shrink-0">
-                  <span>全校考場出席人數即時看板 · 淺色全螢幕零滾動監控模式</span>
-                  <span>按 Esc 鍵或右上角按鈕可返回管理後台</span>
-                </div>
-              </div>
-            )}
-
             {/* 篩選、檢視切換與「全螢幕出席看板」按鈕 */}
+            <div className={isAttendanceWallFullscreen ? 'fixed inset-0 z-50 overflow-y-auto bg-slate-50 p-4 space-y-4' : 'space-y-4'}>
+            {isAttendanceWallFullscreen && <div className="rounded-xl bg-white p-3 font-bold">
+              <p>{selectedPeriod ? periodLabel(selectedPeriod) : '尚無考試節次'} · {gradeFilter === 'all' ? '全年級' : gradeName(Number(gradeFilter))} · {filteredClassrooms.length} 班</p>
+              {fullscreenNote && <p role="status">{fullscreenNote}</p>}
+              <button type="button" onClick={() => setWallPage(Math.max(0, wallPage - 1))} disabled={wallPage === 0} className="p-3 disabled:opacity-40">上一頁</button>
+              <span>第 {Math.min(wallPage + 1, Math.max(1, Math.ceil(filteredClassrooms.length / 8)))} / {Math.max(1, Math.ceil(filteredClassrooms.length / 8))} 頁</span>
+              <button type="button" onClick={() => setWallPage(wallPage + 1)} disabled={(wallPage + 1) * 8 >= filteredClassrooms.length} className="p-3 disabled:opacity-40">下一頁</button>
+              <button type="button" onClick={toggleAttendanceWallFullscreen} className="p-3 underline">退出放大／全螢幕</button>
+            </div>}
             <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="text-xs font-bold text-slate-600 shrink-0">年級:</span>
@@ -1420,7 +1277,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   />
                 </div>
 
-                <div className="hidden md:flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
                   <button
                     type="button"
                     onClick={() => setMatrixDisplayMode('grid')}
@@ -1431,7 +1288,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     }`}
                   >
                     <LayoutGrid className="w-3.5 h-3.5" />
-                    <span>看板宮格</span>
+                    <span>宮格</span>
                   </button>
                   <button
                     type="button"
@@ -1443,7 +1300,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     }`}
                   >
                     <List className="w-3.5 h-3.5" />
-                    <span>清單列表</span>
+                    <span>表格</span>
                   </button>
                 </div>
 
@@ -1453,7 +1310,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   className="px-3.5 py-1.5 rounded-xl bg-teal-800 hover:bg-teal-900 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap shadow-2xs transition-colors"
                 >
                   <Maximize2 className="w-3.5 h-3.5" />
-                  <span>全螢幕出席看板</span>
+                  <span>{isAttendanceWallFullscreen ? '退出全螢幕' : '放大目前清單'}</span>
                 </button>
               </div>
             </div>
@@ -1471,10 +1328,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </div>
             ) : matrixDisplayMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {filteredClassrooms.map((c) => {
+                {(isAttendanceWallFullscreen ? filteredClassrooms.slice(Math.min(wallPage, Math.max(0, Math.ceil(filteredClassrooms.length / 8) - 1)) * 8, (Math.min(wallPage, Math.max(0, Math.ceil(filteredClassrooms.length / 8) - 1)) + 1) * 8) : filteredClassrooms).map((c) => {
                   const classIssues = data.issues.filter((i) => i.classId === c.classId);
                   const hasUnresolved = classIssues.some((i) => i.status !== 'resolved');
-                  const latestIssue = classIssues[0];
+                  const latestIssue = classIssues.filter((i) => i.status !== 'resolved').sort((a, b) => Number(b.isUrgent) - Number(a.isUrgent))[0];
 
                   return (
                     <div
@@ -1503,6 +1360,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             type="button"
                             onClick={() => {
                               if (latestIssue) setSelectedIssueId(latestIssue.id);
+                              setIssueClassFilter(c.classId);
                               setActiveTab('issues');
                             }}
                             className="px-2.5 py-1 rounded-lg bg-rose-700 text-white font-black text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap"
@@ -1518,7 +1376,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                 : 'bg-amber-50 text-amber-800 border border-amber-200'
                             }`}
                           >
-                            {c.statusReported ? '已點名' : '回報中'}
+                            {c.statusReported ? '已點名' : '待點名'}
                           </span>
                         )}
                       </div>
@@ -1533,7 +1391,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <div className="bg-emerald-50/80 rounded-lg border border-emerald-200/80">
                           <span className="text-[11px] font-bold text-emerald-800 block">實到</span>
                           <span className="font-mono font-black text-lg text-emerald-700 tabular-nums leading-tight">
-                            {c.presentCount}
+                            {c.statusReported ? c.presentCount : '—'}
                           </span>
                         </div>
                         <div
@@ -1549,14 +1407,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
                               c.absentCount > 0 ? 'text-rose-700' : 'text-slate-600'
                             }`}
                           >
-                            {c.absentCount}
+                            {c.statusReported ? c.absentCount : '—'}
                           </span>
                         </div>
                       </div>
 
                       <div className="flex items-center justify-between text-xs pt-0.5">
                         <span className="text-slate-600 font-bold truncate max-w-[175px]">
-                          {c.absentStudents && c.absentStudents.length > 0
+                          {!c.statusReported ? '待點名' : c.absentStudents && c.absentStudents.length > 0
                             ? `缺席：${c.absentStudents.map((s) => `#${s.seatNo} ${s.name}`).join('、')}`
                             : '全班到齊'}
                         </span>
@@ -1575,14 +1433,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 })}
               </div>
             ) : (
-              /* 清單列表模式 */
+              /* 表格模式 */
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
+                <p className="px-4 py-2 text-xs text-slate-600 sm:hidden">表格可左右滑動；也可切換上方「宮格」。</p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs sm:text-sm border-collapse">
                     <thead>
                       <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-black">
                         <th className="py-2.5 px-4">考場班級</th>
                         <th className="py-2.5 px-4">監考教師</th>
+                        <th className="py-2.5 px-4">點名狀態</th>
                         <th className="py-2.5 px-3 text-center font-mono">應到</th>
                         <th className="py-2.5 px-3 text-center font-mono">實到</th>
                         <th className="py-2.5 px-3 text-center font-mono">缺席</th>
@@ -1592,10 +1452,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-bold">
-                      {filteredClassrooms.map((c) => {
+                      {(isAttendanceWallFullscreen ? filteredClassrooms.slice(Math.min(wallPage, Math.max(0, Math.ceil(filteredClassrooms.length / 8) - 1)) * 8, (Math.min(wallPage, Math.max(0, Math.ceil(filteredClassrooms.length / 8) - 1)) + 1) * 8) : filteredClassrooms).map((c) => {
                         const classIssues = data.issues.filter((i) => i.classId === c.classId);
                         const hasUnresolved = classIssues.some((i) => i.status !== 'resolved');
-                        const latestIssue = classIssues[0];
+                        const latestIssue = classIssues.filter((i) => i.status !== 'resolved').sort((a, b) => Number(b.isUrgent) - Number(a.isUrgent))[0];
 
                         return (
                           <tr
@@ -1610,21 +1470,22 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             <td className="py-2.5 px-4 text-slate-600 whitespace-nowrap">
                               {c.invigilator}
                             </td>
+                            <td className="px-4">{c.statusReported ? '已回報' : '待點名'}</td>
                             <td className="py-2.5 px-3 text-center font-mono tabular-nums text-slate-700">
                               {c.expectedCount}
                             </td>
                             <td className="py-2.5 px-3 text-center font-mono tabular-nums text-emerald-700 font-black">
-                              {c.presentCount}
+                              {c.statusReported ? c.presentCount : '—'}
                             </td>
                             <td className="py-2.5 px-3 text-center font-mono tabular-nums">
-                              {c.absentCount > 0 ? (
-                                <span className="text-rose-700 font-black">{c.absentCount}</span>
+                              {!c.statusReported ? '—' : c.absentCount > 0 ? (
+                                <span className="text-rose-700 font-black">{c.statusReported ? c.absentCount : '—'}</span>
                               ) : (
                                 <span className="text-slate-600">0</span>
                               )}
                             </td>
                             <td className="py-2.5 px-4 text-slate-600 max-w-xs truncate text-xs">
-                              {c.absentStudents && c.absentStudents.length > 0 ? (
+                              {!c.statusReported ? <span>待點名</span> : c.absentStudents && c.absentStudents.length > 0 ? (
                                 c.absentStudents
                                   .map((st) => `#${st.seatNo} ${st.name} (${st.reason})`)
                                   .join(' · ')
@@ -1638,6 +1499,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                   type="button"
                                   onClick={() => {
                                     if (latestIssue) setSelectedIssueId(latestIssue.id);
+                              setIssueClassFilter(c.classId);
                                     setActiveTab('issues');
                                   }}
                                   className="px-2.5 py-1 rounded-xl bg-rose-700 hover:bg-rose-700 text-white font-black text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap"
@@ -1648,7 +1510,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                               ) : (
                                 <span className="text-emerald-700 flex items-center gap-1 font-black whitespace-nowrap">
                                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                  <span>考場正常</span>
+                                  <span>無未結案通報</span>
                                 </span>
                               )}
                             </td>
@@ -1671,6 +1533,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </div>
             )}
 
+            </div>
             {/* 內嵌式「快速改題目廣播」卡片 */}
             {isEmbedded && (
               <form
@@ -1680,7 +1543,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 pb-2">
                   <div className="flex items-center gap-2 text-amber-950 font-black text-sm">
                     <Radio className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />
-                    <span>試題更正 / 廣播公告（直接傳到黑板）</span>
+                    <span>試題更正／公告（考科僅為標籤；時間延長不改考程）</span>
                   </div>
                 </div>
                 <div>
@@ -1703,6 +1566,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 font-bold"
                   />
                 </div>
+                <p className="text-xs font-bold text-amber-900">考科僅為標籤，不會限制接收班級。「時間延長」僅發布通知，考程時間不變；若需延後，請至考務設定 → 考程調整。</p>
                 {announcementScheduleFields}
                 <button
                   type="submit"
@@ -1752,7 +1616,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="admin-anno-subject" className="block text-xs font-black text-slate-700 mb-1">考科</label>
+                    <label htmlFor="admin-anno-subject" className="block text-xs font-black text-slate-700 mb-1">考科（僅標籤）</label>
                     <input id="admin-anno-subject"
                       type="text"
                       value={annoSubject}
@@ -1798,6 +1662,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   />
                 </div>
 
+                <p className="text-xs font-bold text-amber-900">考科僅為標籤，不會限制接收班級。「時間延長」僅發布通知，考程時間不變；若需延後，請至考務設定 → 考程調整。</p>
                 {announcementScheduleFields}
                 <button
                   type="submit"
@@ -1837,10 +1702,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           className="text-rose-700 hover:text-rose-800 font-black flex items-center gap-1 cursor-pointer min-h-[32px] px-2 disabled:opacity-50"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                          <span>{withdrawingId === anno.id ? '撤回中…' : '撤回取消'}</span>
+                          <span>{withdrawingId === anno.id ? '撤回中…' : '撤回公告'}</span>
                         </button>
                       </div>
                       <div className="font-black text-slate-900 text-sm">{anno.title}</div>
+                      <p className="font-bold">對象：{getTargetAudienceLabel(anno.targetAudience)} · {sourceData.classrooms.filter((room) => anno.targetAudience === 'all' || anno.targetAudience === room.classId || anno.targetAudience === `grade_${room.grade}`).length} 班</p>
+                      <button type="button" className="underline" onClick={() => { setAnnoTitle(anno.title); setAnnoContent(anno.content); setAnnoSubject(anno.subject); setAnnoType(anno.type); setTargetAudience(anno.targetAudience); setAnnoStartsAt(''); setAnnoEndsAt(''); setPublishSuccess(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>複製為新公告（修正後重新發布）</button>
                       <dl className="space-y-1 text-slate-700">
                         <div className="flex flex-wrap gap-x-2">
                           <dt className="font-bold">狀態</dt>
@@ -1877,13 +1744,15 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <div className="lg:col-span-6 bg-white rounded-2xl sm:rounded-3xl border-2 border-slate-200 p-4 sm:p-6 shadow-sm space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="text-sm sm:text-base font-black text-slate-900">
-                  各考場通報清單 ({data.issues.length})
+                  各考場通報清單 ({data.issues.filter((i) => !issueClassFilter || i.classId === issueClassFilter).length}) · 待處理 {data.issues.filter((i) => i.status !== 'resolved' && (!issueClassFilter || i.classId === issueClassFilter)).length} 件
                 </h3>
-                <span className="text-xs text-slate-600 font-bold">點選案件即可派人</span>
+                <span className="text-xs text-slate-600 font-bold">先聯絡支援人員，再選案件回覆</span>
               </div>
 
               <div className="space-y-3 overflow-y-auto max-h-[500px] pr-1">
-                {data.issues.map((issue) => (
+                {issueClassFilter && <button type="button" onClick={() => setIssueClassFilter('')} className="underline">目前：{issueClassFilter}，清除考場篩選</button>}
+                {!data.issues.some((i) => !issueClassFilter || i.classId === issueClassFilter) && <p className="p-4 text-slate-600">目前沒有考場通報。</p>}
+                {data.issues.filter((i) => !issueClassFilter || i.classId === issueClassFilter).map((issue) => (
                   <button
                     type="button"
                     key={issue.id}
@@ -1961,7 +1830,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       {/* 一鍵派遣 4 大按鈕 */}
                       <div className="space-y-2">
                         <span className="text-xs font-black text-slate-800 block">
-                          選擇處理方式，確認後通知監考老師
+                          請先依校內方式聯絡支援人員；以下只回覆監考老師，不會通知健康中心、巡堂或總務。
                         </span>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <button
@@ -1970,14 +1839,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             onClick={() =>
                               handleQuickDispatch(
                                 issue.id,
-                                '已通知健康中心護理師攜帶急救箱出發前往協助！請老師安心。',
+                                '教務處已聯絡健康中心請求協助；到場時間待確認。',
                                 'processing'
                               )
                             }
                             className="min-h-[48px] p-3.5 rounded-2xl bg-rose-50 hover:bg-rose-100 border-2 border-rose-300 text-rose-950 font-black text-xs sm:text-sm text-left transition-all cursor-pointer flex items-center gap-2"
                           >
                             <HeartPulse className="w-5 h-5 text-rose-700 shrink-0" />
-                            <span>派健康中心護理師前往</span>
+                            <span>我已聯絡健康中心，回覆老師</span>
                           </button>
 
                           <button
@@ -1986,14 +1855,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             onClick={() =>
                               handleQuickDispatch(
                                 issue.id,
-                                '巡堂組老師已攜帶備用試卷前往送達！請稍候 1 分鐘。',
+                                '教務處已聯絡巡堂組協助補送試卷；到場時間待確認。',
                                 'processing'
                               )
                             }
                             className="min-h-[48px] p-3.5 rounded-2xl bg-teal-50 hover:bg-teal-100 border-2 border-teal-300 text-teal-950 font-black text-xs sm:text-sm text-left transition-all cursor-pointer flex items-center gap-2"
                           >
                             <FileText className="w-5 h-5 text-teal-700 shrink-0" />
-                            <span>巡堂送達備用試卷</span>
+                            <span>我已聯絡巡堂補卷，回覆老師</span>
                           </button>
 
                           <button
@@ -2002,14 +1871,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             onClick={() =>
                               handleQuickDispatch(
                                 issue.id,
-                                '總務處維修人員已在前往途中，請老師安撫考生。',
+                                '教務處已聯絡總務處請求維修；到場時間待確認。',
                                 'processing'
                               )
                             }
                             className="min-h-[48px] p-3.5 rounded-2xl bg-amber-50 hover:bg-amber-100 border-2 border-amber-300 text-amber-950 font-black text-xs sm:text-sm text-left transition-all cursor-pointer flex items-center gap-2"
                           >
                             <Wrench className="w-5 h-5 text-amber-600 shrink-0" />
-                            <span>派總務工友維修設備</span>
+                            <span>我已聯絡總務，回覆老師</span>
                           </button>
 
                           <button
@@ -2041,7 +1910,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 })()
               ) : (
                 <div className="text-center py-12 text-slate-600 font-bold">
-                  請從左側點選一筆要處理的考場通報
+                  請先在通報清單選擇案件；沒有案件時無須操作。
                 </div>
               )}
             </div>
@@ -2081,10 +1950,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" onClick={exportAttendanceCSV} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-teal-900 hover:bg-teal-50">
-                    <Download size={16} aria-hidden="true" />考務總表 CSV
+                    <Download size={16} aria-hidden="true" />全校彙總＋目前篩選明細 CSV
                   </button>
                   <button type="button" onClick={exportAbsentRosterCSV} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-teal-900 hover:bg-teal-50">
-                    <FileText size={16} aria-hidden="true" />缺席清冊 CSV
+                    <FileText size={16} aria-hidden="true" />目前篩選缺席清冊 CSV
                   </button>
                 </div>
               </div>
@@ -2124,8 +1993,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       學校名稱
                       <input
                         type="text"
-                        value={configForm.schoolName}
-                        onChange={(e) => setConfigForm({ ...configForm, schoolName: e.target.value })}
+                        disabled={savingConfig} value={configForm.schoolName}
+                        onChange={(e) => updateConfigDraft({ ...configForm, schoolName: e.target.value })}
                         className="mt-1 w-full text-sm font-black p-2.5 rounded-xl border border-slate-300"
                       />
                     </label>
@@ -2133,16 +2002,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       學年度與學期
                       <input
                         type="text"
-                        value={configForm.academicYear}
-                        onChange={(e) => setConfigForm({ ...configForm, academicYear: e.target.value })}
+                        disabled={savingConfig} value={configForm.academicYear}
+                        onChange={(e) => updateConfigDraft({ ...configForm, academicYear: e.target.value })}
                         className="mt-1 w-full text-sm font-black p-2.5 rounded-xl border border-slate-300"
                       />
                     </label>
                   </div>
                   <label className="block text-xs font-black text-slate-700">
                     段考名稱
-                    <input type="text" value={configForm.examName}
-                      onChange={(e) => setConfigForm({ ...configForm, examName: e.target.value })}
+                    <input type="text" disabled={savingConfig} value={configForm.examName}
+                      onChange={(e) => updateConfigDraft({ ...configForm, examName: e.target.value })}
                       className="mt-1 w-full text-sm font-black p-2.5 rounded-xl border border-slate-300" />
                   </label>
 
@@ -2150,8 +2019,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     考場守則（每行一項）
                     <textarea
                       rows={3}
-                      value={configForm.rulesNotes.join('\n')}
-                      onChange={(e) => setConfigForm({ ...configForm, rulesNotes: e.target.value.split('\n') })}
+                      disabled={savingConfig} value={configForm.rulesNotes.join('\n')}
+                      onChange={(e) => updateConfigDraft({ ...configForm, rulesNotes: e.target.value.split('\n') })}
                       className="mt-1 w-full text-sm font-black p-2.5 rounded-xl border border-slate-300"
                     />
                   </label>
@@ -2193,11 +2062,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       全校監考教師名冊匯入與獨立帳號管理
                     </h3>
                     <p className="text-xs text-slate-600 font-bold mt-0.5">
-                      建立與匯入全校教師專屬的獨立登入帳號與密碼（考場排班指派請至「考場監考指派」頁面操作）
+                      建立與匯入全校教師專屬的獨立登入帳號與密碼（考場排班指派請至「監考指派」頁面操作）
                     </p>
                   </div>
                 </div>
 
+                <label className="block text-sm font-bold">匯入方式（檔案與貼上共用；每次上限 50 筆）
+                  <select value={batchImportMode} onChange={(e) => setBatchImportMode(e.target.value as 'merge' | 'replace')} className="ml-2 rounded border p-2">
+                    <option value="merge">合併新增／更新</option><option value="replace">覆蓋名冊（未列入者將移除）</option>
+                  </select>
+                </label>
                 {/* 批次匯入、範本下載與前往指派頁操作列 */}
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" onClick={() => openTeacherForm()}
@@ -2253,7 +2127,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     className="min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
                   >
                     <UserCheck className="w-4 h-4" />
-                    <span>前往考場監考指派 →</span>
+                    <span>前往監考指派 →</span>
                   </button>
                 </div>
               </div>
@@ -2337,7 +2211,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       onClick={() => void importTeacherText(batchImportText)}
                       className="px-5 py-2 rounded-xl bg-teal-800 hover:bg-teal-900 text-white text-xs font-black cursor-pointer shadow-2xs disabled:opacity-50"
                     >
-                      確認匯入教師名冊
+                      預覽並確認匯入教師名冊
                     </button>
                   </div>
                 </div>
@@ -2406,10 +2280,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             type="password"
                             required={!editingTeacherId}
                             autoComplete="new-password"
+                            minLength={MIN_TEACHER_PASSWORD_LENGTH}
                             maxLength={256}
                             value={tchPassForm}
                             onChange={(e) => setTchPassForm(e.target.value)}
-                            placeholder={editingTeacherId ? '留空可沿用原密碼' : '設定登入密碼'}
+                            placeholder={editingTeacherId ? '留空沿用；重設至少 12 字元' : '至少 12 字元，建議使用長密語'}
                             className="w-full text-xs sm:text-sm font-mono font-black p-2 rounded-xl border border-slate-300 bg-white"
                           />
                         </div>
@@ -2495,7 +2370,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    已排班教師 ({teachersList.filter((t) => Boolean(t.assignedClassId)).length})
+                    已排班教師 ({teachersList.filter(hasAssignment).length})
                   </button>
                   <button
                     type="button"
@@ -2506,7 +2381,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    待命教師 ({teachersList.filter((t) => !t.assignedClassId).length})
+                    待命教師 ({teachersList.filter((t) => !hasAssignment(t)).length})
                   </button>
                 </div>
 
@@ -2526,6 +2401,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </div>
               </div>
 
+              <p className="text-sm font-bold">符合條件 {visibleTeachers.length} / {teachersList.length} 位教師</p>
               {/* 全校教師獨立帳號清冊表格 (純名冊與帳密管理) */}
               <div className="border border-slate-200 rounded-2xl overflow-hidden">
                 <div className="overflow-x-auto max-h-[460px] overflow-y-auto">
@@ -2540,20 +2416,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200/80 text-xs sm:text-sm bg-white">
-                      {teachersList
-                        .filter((t) => {
-                          if (teacherAssignFilter === 'assigned' && !t.assignedClassId) return false;
-                          if (teacherAssignFilter === 'unassigned' && t.assignedClassId) return false;
-                          if (teacherSearch.trim()) {
-                            const q = teacherSearch.trim().toLowerCase();
-                            return (
-                              t.name.toLowerCase().includes(q) ||
-                              t.username.toLowerCase().includes(q) ||
-                              (t.department || '').toLowerCase().includes(q)
-                            );
-                          }
-                          return true;
-                        })
+                      {!visibleTeachers.length && <tr><td colSpan={5} className="p-6 text-center">
+                        {teachersList.length ? '沒有符合條件的教師。' : '尚未建立教師名冊，請新增帳號或匯入名單。'}
+                        <button type="button" onClick={() => { setTeacherSearch(''); setTeacherAssignFilter('all'); }} className="ml-2 underline">清除篩選</button>
+                      </td></tr>}
+                      {visibleTeachers
                         .map((t) => {
                           const assignedClass = data.classrooms.find(
                             (c) => c.classId === t.assignedClassId
@@ -2583,14 +2450,15 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-black">
                                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                                     <span>
-                                      {assignedClass.classId} {assignedClass.className}
+                                      預設考場：{assignedClass.classId} {assignedClass.className}
                                     </span>
                                   </span>
                                 ) : (
                                   <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold">
-                                    未排班（待命）
+                                    {hasAssignment(t) ? '已有分節監考' : '未排班（待命）'}
                                   </span>
                                 )}
+                                <details className="mt-2"><summary>有效監考節次：{teacherSlots(t).length}</summary><ul>{teacherSlots(t).map((slot) => <li key={slot}>{slot}</li>)}</ul></details>
                               </td>
                               <td className="py-2.5 px-4 text-right whitespace-nowrap">
                                 <div className="inline-flex items-center gap-1.5">

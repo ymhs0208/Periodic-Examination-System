@@ -42,9 +42,9 @@ interface NavigationItem {
 }
 
 const adminItems: NavigationItem[] = [
-  { view: 'admin', label: '教務處試務台', description: '考場總覽、公告與通報處理', icon: Building2 },
+  { view: 'admin', label: '教務管理中心', description: '考場總覽、公告與通報處理', icon: Building2 },
   { view: 'admin', tab: 'teachers', label: '教師帳號管理', description: '匯入名冊與管理登入帳號', icon: Users },
-  { view: 'admin', tab: 'assign', label: '考場監考指派', description: '安排各班的監考老師', icon: UserCheck },
+  { view: 'admin', tab: 'assign', label: '監考指派', description: '安排各班的監考老師', icon: UserCheck },
   { view: 'admin', tab: 'settings', label: '考程與班級設定', description: '維護考程、考場與管理員帳號', icon: Settings },
   { view: 'admin', tab: 'logs', label: '操作紀錄', description: '查看登入及考務異動', icon: History }
 ];
@@ -128,7 +128,7 @@ export function Header({
   }
 
   const groups = [
-    ...(isAdminAuthed ? [{ label: '教務行政', items: adminItems }] : []),
+    ...(isAdminAuthed ? [{ label: '教務管理中心', items: adminItems }] : []),
     { label: '考場作業', items: [canSubmitCorrections
       ? { ...invigilatorItem, description: '查看監考安排與試題更正送審' }
       : invigilatorItem] },
@@ -157,7 +157,7 @@ export function Header({
           <span className="min-w-0">
             <span className="block truncate text-sm font-black tracking-tight min-[400px]:hidden">段考考務系統</span>
             <span className="hidden truncate text-sm font-black tracking-tight min-[400px]:block sm:text-base">段考考務即時管理系統</span>
-            <span aria-hidden="true" className="hidden text-[10px] font-bold tracking-widest text-teal-200/90 lg:block">考場、點名與教務行政</span>
+            <span aria-hidden="true" className="hidden text-[10px] font-bold tracking-widest text-teal-200/90 lg:block">考場、點名與教務管理中心</span>
           </span>
         </a>
 
@@ -267,8 +267,8 @@ export function Header({
               </nav>
 
               <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-slate-200 bg-slate-50 p-2.5">
-                <a href={VIEW_PATHS.login} onClick={(event) => navigate(event, 'login')} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-2 text-xs font-bold hover:bg-slate-100 ${focusStyle}`}>
-                  <KeyRound size={15} aria-hidden="true" />切換帳號
+                <a href={VIEW_PATHS.login} onClick={(event) => { event.preventDefault(); setIsMenuOpen(false); onLogout(); }} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-2 text-xs font-bold hover:bg-slate-100 ${focusStyle}`}>
+                  <KeyRound size={15} aria-hidden="true" />登出並切換帳號
                 </a>
                 <button type="button" disabled={loggingOut} onClick={() => {
                   setIsMenuOpen(false);

@@ -2,6 +2,10 @@ import type { ExamSession } from './exam';
 
 export const auditActions = {
   login: '登入',
+  loginFailed: '登入失敗',
+  rateLimited: '安全限流',
+  accessDenied: '拒絕授權',
+  reauthenticate: '重新驗證',
   logout: '登出',
   adminCreate: '新增管理員',
   adminUpdate: '更新管理員設定',

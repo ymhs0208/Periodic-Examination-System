@@ -3,10 +3,17 @@ export type IssueStatus = 'pending' | 'processing' | 'resolved';
 
 export const ABSENCE_REASONS = ['病假', '事假', '喪假', '公假', '曠課'];
 export const MIN_ADMIN_PASSWORD_LENGTH = 8;
+export const MIN_TEACHER_PASSWORD_LENGTH = 12;
+export function validTeacherPassword(password: unknown): password is string {
+  if (typeof password !== 'string') return false;
+  const value = password.trim();
+  return [...value].length >= MIN_TEACHER_PASSWORD_LENGTH && value.length <= 256 &&
+    !/^(.)\1+$/u.test(value) && !['password1234', '123456789012', 'qwerty123456', 'abcdefghijkl'].includes(value.toLowerCase());
+}
 
-export function publicAbsenceReason(reason: string): string {
-  const label = reason?.trim();
-  return ABSENCE_REASONS.includes(label) ? label : '';
+export function publicAbsenceReason(_reason: string): string {
+  // Public views must never disclose health, family or other absence reasons.
+  return '';
 }
 
 export interface AbsentStudent {

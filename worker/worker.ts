@@ -4,7 +4,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { Hono, type Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { bodyLimit } from 'hono/body-limit';
-import { createEmptyExamState, MIN_ADMIN_PASSWORD_LENGTH, publicAbsenceReason } from '../src/types/exam';
+import { createEmptyExamState, MIN_ADMIN_PASSWORD_LENGTH } from '../src/types/exam';
 import type { AbsentStudent, AdminAccounts, ClassroomExamState, CorrectionProposal, ExamAttendance, ExamIssue, ExamSession, SystemData } from '../src/types/exam';
 import { examPeriods, invigilationConflicts, LEGACY_PERIOD_ID, periodApplies } from '../src/types/examSchedule';
 import { announcementStatus, nextAnnouncementBoundary } from '../src/types/announcements';
@@ -12,7 +12,9 @@ import { availableGrades } from '../src/types/grades';
 import type { AuditAction, AuditLogEntry, AuditLogPage } from '../src/types/audit';
 import { auditExpiry, examAuditOperation } from './audit';
 import { api } from './examRoutes';
-import { adminState, hashPassword, MAX_PASSWORD_LENGTH, verifyPassword, type StoredExamState } from './passwords';
+import { validateMutation } from './validation';
+import { activeAnnouncements, canAccessPeriod, canAccessRoom, publicAbsences, visibleClassroom, visibleIssue, visibleState } from './visibility';
+import { adminState, hashPassword, MAX_PASSWORD_LENGTH, DUMMY_PASSWORD_HASH, verifyPassword, type StoredExamState } from './passwords';
 
 type WorkerEnv = Env & {
   ADMIN_USERNAME?: string;
@@ -82,68 +84,12 @@ function isLoopback(url: URL) {
   return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 }
 
-function publicAbsences(students: AbsentStudent[]) {
-  return students.map(({ seatNo, reason }) => ({
-    seatNo, name: '', reason: publicAbsenceReason(reason)
-  }));
-}
-
-function canAccessRoom(session: ExamSession | null, classId: string) {
-  return session?.role === 'admin' || session?.classId === classId || session?.invigilation?.some((item) => item.classId === classId);
-}
-
-function canAccessPeriod(session: ExamSession | null, classId: string, periodId: string) {
-  return session?.role === 'admin' || session?.invigilation?.some((item) => item.classId === classId && item.periodId === periodId);
-}
-
-function visibleClassroom(classroom: ClassroomExamState, session: ExamSession | null, state: SystemData) {
-  const periodInvigilatorNames = classroom.periodInvigilators && Object.fromEntries(
-    Object.entries(classroom.periodInvigilators).map(([periodId, teacherId]) => [
-      periodId, state.teachers?.find((teacher) => teacher.id === teacherId)?.name ?? '待指派監考老師'
-    ])
-  );
-  if (session?.role === 'admin') return { ...classroom, periodInvigilatorNames };
-  const periodAttendance = classroom.periodAttendance && Object.fromEntries(
-    Object.entries(classroom.periodAttendance).map(([id, record]) => [
-      id, canAccessPeriod(session, classroom.classId, id) ? record : { ...record, absentStudents: publicAbsences(record.absentStudents) }
-    ])
-  );
-  return {
-    ...classroom,
-    absentStudents: canAccessPeriod(session, classroom.classId, LEGACY_PERIOD_ID) ||
-      (session?.classId === classroom.classId && !examPeriods(state.config).length)
-      ? classroom.absentStudents : publicAbsences(classroom.absentStudents),
-    periodAttendance,
-    periodInvigilators: undefined,
-    periodInvigilatorNames,
-    invigilatorUsername: undefined
-  };
-}
-
-function visibleIssue(issue: ExamIssue, session: ExamSession | null) {
-  return canAccessRoom(session, issue.classId);
-}
-
-function activeAnnouncements(state: SystemData, now: number) {
-  return state.announcements.filter((item) => announcementStatus(item, now) === 'active');
-}
-
-function visibleState(state: StoredExamState, session: ExamSession | null): SystemData {
-  const classrooms = state.classrooms.map((room) => visibleClassroom(room, session, state));
-  if (session?.role === 'admin') return { ...adminState(state), classrooms };
-  return {
-    ...state,
-    teachers: [],
-    correctionProposals: session?.canSubmitCorrections
-      ? state.correctionProposals?.filter((item) => item.teacherId === session.teacherId)
-      : [],
-    classrooms,
-    issues: state.issues.filter((issue) => visibleIssue(issue, session)),
-    announcements: activeAnnouncements(state, Date.now())
-  };
-}
 
 export class ExamRoom extends DurableObject<WorkerEnv> {
+  private pendingRequests = 0;
+  private requestQueue: Promise<unknown> = Promise.resolve();
+  private readonly readLimits = new Map<string, { count: number; until: number }>();
+  private securityLogWindow = { count: 0, until: 0 };
   private readonly router = new Hono<{ Variables: ExamVariables }>();
 
   constructor(ctx: DurableObjectState, env: WorkerEnv) {
@@ -181,21 +127,40 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
       );
       CREATE INDEX IF NOT EXISTS audit_log_expiry ON audit_log(expires_at);
     `);
+    this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS session_security (
+      token TEXT PRIMARY KEY, verified_at INTEGER NOT NULL
+    )`);
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"event":"PING"}', '{"event":"PONG"}'));
 
-    this.router.use('/api/*', bodyLimit({
-      maxSize: 5 * 1024 * 1024,
+    this.router.use('/api/*', (c, next) => bodyLimit({
+      maxSize: c.req.path.startsWith('/api/exam/import/') ? 1024 * 1024 : 64 * 1024,
       onError: (c) => c.json({ success: false, error: '上傳資料超過大小限制' }, 413)
-    }));
+    })(c, next));
 
     this.router.use('*', async (c, next) => {
       const method = c.req.method;
       const path = c.req.path;
       const origin = c.req.header('Origin');
+      c.header('Cache-Control', 'no-store');
+      c.header('X-Request-ID', crypto.randomUUID());
+      // Admission control runs before JSON parsing, state loads and expensive hashes.
+      const ip = c.req.header('CF-Connecting-IP') || 'local';
+      const category = path === '/ws' ? 'ws' : path === '/api/auth/login' || path === '/api/auth/reauth' ? 'auth' : method === 'GET' ? 'read' : 'write';
+      if (!this.admit(`global:${category}`, category === 'auth' ? 300 : 1200) || !this.admit(`${category}:${ip}`, category === 'auth' ? 120 : 240)) {
+        this.securityAudit('rateLimited', null, category, c.res.headers.get('X-Request-ID'));
+        c.header('Retry-After', '60');
+        return c.json({ success: false, error: '請求過於頻繁，請稍後再試' }, 429);
+      }
       if (origin && origin !== new URL(c.req.url).origin && (method !== 'GET' || path === '/ws')) {
+        this.securityAudit('accessDenied', null, 'origin', c.res.headers.get('X-Request-ID'));
         return c.json({ success: false, error: '不允許跨網站操作' }, 403);
       }
 
+      if (this.pendingRequests >= 128) {
+        c.header('Retry-After', '5');
+        this.securityAudit('rateLimited', null, 'queue-capacity', c.res.headers.get('X-Request-ID'));
+        return c.json({ success: false, error: '系統忙碌中，請稍後再試' }, 503);
+      }
       let body: ExamVariables['body'] = {};
       if (c.req.header('Content-Type')?.includes('application/json')) {
         try {
@@ -208,7 +173,7 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
       }
 
       // Serialize the read, change and storage write so simultaneous submissions cannot overwrite each other.
-      return this.ctx.blockConcurrencyWhile(async () => {
+      return this.serializeRequest(async () => {
         const state: StoredExamState = await this.ctx.storage.get<StoredExamState>(STATE_KEY) ?? createEmptyExamState();
         const credentialsPending = await this.migrateCredentials(state);
         if (credentialsPending) await this.scheduleNextAlarm(state, Date.now(), true);
@@ -224,7 +189,10 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
         const publicRoute = (method === 'GET' && ['/ws', '/api/exam/state', '/api/auth/session'].includes(path)) ||
           (method === 'POST' && ['/api/auth/login', '/api/auth/logout'].includes(path));
         if (!publicRoute && session?.role !== 'admin') {
-          if (!session) return c.json({ success: false, error: '請先登入' }, 401);
+          if (!session) {
+            this.securityAudit('accessDenied', null, 'authentication', c.res.headers.get('X-Request-ID'));
+            return c.json({ success: false, error: '請先登入' }, 401);
+          }
           const canSubmitCorrection = path === '/api/exam/corrections' && session.canSubmitCorrections;
           const canWriteClassroom = typeof body.classId === 'string' && CLASS_WRITE_PATHS.test(path) &&
             (path === '/api/exam/attendance'
@@ -232,17 +200,32 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
                 (body.periodId === undefined && !examPeriods(state.config).length && canAccessRoom(session, body.classId))
               : canAccessRoom(session, body.classId));
           if (method !== 'POST' || (!canSubmitCorrection && !canWriteClassroom)) {
+            this.securityAudit('accessDenied', session, 'authorization', c.res.headers.get('X-Request-ID'));
             return c.json({ success: false, error: '沒有此操作權限' }, 403);
           }
         }
 
+        const invalid = validateMutation(path, method, body, state);
+        if (invalid) return c.json({ success: false, error: invalid }, 400);
+        const sensitive = method !== 'GET' && (
+          /^\/api\/auth\/(admins|credentials)(?:\/|$)/.test(path) ||
+          /^\/api\/exam\/teachers(?:\/|$)/.test(path) ||
+          (path.startsWith('/api/exam/import/') && !!body.expectedVersion));
+        if (session?.role === 'admin' && sensitive) {
+          const [proof] = this.ctx.storage.sql.exec<{ verified_at: number }>('SELECT verified_at FROM session_security WHERE token = ?', token ?? '');
+          if (!proof || Date.now() - proof.verified_at > 5 * 60_000) {
+            this.securityAudit('accessDenied', session, 'recent-auth-required', c.res.headers.get('X-Request-ID'));
+            return c.json({ success: false, error: '此操作需要重新驗證管理員密碼' }, 428);
+          }
+        }
         const previousTeachers = new Map(state.teachers?.map((teacher) => [teacher.id, teacher.passwordHash]));
-        const requiresPeriodRecords = path === '/api/exam/state' || path === '/api/exam/periods' || path === '/ws';
+        const requiresPeriodRecords = path === '/api/exam/attendance' || path === '/api/exam/state' || path === '/api/exam/periods' || path === '/ws';
         if (requiresPeriodRecords) this.loadPeriodAttendance(state);
         const checkInvigilation = method !== 'GET' && /^\/api\/exam\/(?:teachers|classroom|periods|config)(?:\/|$)/.test(path)
           && state.classrooms.some((room) => Object.keys(room.periodInvigilators ?? {}).length);
         const previousConflicts = checkInvigilation ? invigilationConflicts(state) : undefined;
         await next();
+        if ([401, 403].includes(c.res.status)) this.securityAudit('accessDenied', session, 'route-authorization', c.res.headers.get('X-Request-ID'));
         if (c.res.ok && events.length) {
           if (previousConflicts) {
             for (const [key, message] of invigilationConflicts(state)) {
@@ -300,6 +283,7 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
       const account = String(username ?? '').trim();
       const secret = String(password ?? '').trim();
       if (!account || account.length > MAX_ACCOUNT_LENGTH || !secret || secret.length > MAX_PASSWORD_LENGTH) {
+        this.securityAudit('loginFailed', null, 'invalid-input', c.res.headers.get('X-Request-ID'));
         return c.json({ success: false, error: '帳號或密碼錯誤，請重新確認' }, 401);
       }
       const state = c.get('state');
@@ -316,17 +300,17 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
       const retryAfter = this.loginRetryAfter(limits, now);
       if (retryAfter > 0) {
         c.header('Retry-After', String(retryAfter));
+        this.securityAudit('rateLimited', null, 'login', c.res.headers.get('X-Request-ID'));
         return c.json({ success: false, error: '登入嘗試次數過多，請稍後再試' }, 429);
       }
 
-      const isAdmin = !!matchedAdmin?.enabled && await verifyPassword(secret, matchedAdmin.password_hash);
-      if (!isAdmin && teacher && !teacher.passwordHash && typeof teacher.password === 'string') {
-        teacher.passwordHash = await hashPassword(teacher.password);
-        delete teacher.password;
-        await this.ctx.storage.put(STATE_KEY, state);
-      }
-      const isTeacher = !isAdmin && !!teacher?.passwordHash && await verifyPassword(secret, teacher.passwordHash);
+      // Exactly two scrypt verifications on every well-formed, non-throttled attempt.
+      const adminValid = await verifyPassword(secret, matchedAdmin?.enabled ? matchedAdmin.password_hash : DUMMY_PASSWORD_HASH);
+      const teacherValid = await verifyPassword(secret, teacher?.passwordHash ?? DUMMY_PASSWORD_HASH);
+      const isAdmin = !!matchedAdmin?.enabled && adminValid;
+      const isTeacher = !isAdmin && !!teacher?.passwordHash && teacherValid;
       if (!isAdmin && !isTeacher) {
+        this.securityAudit('loginFailed', matchedAdmin ? { role: 'admin', username: matchedAdmin.id } : teacher ? { role: 'invigilator', username: teacher.id } : null, 'credentials', c.res.headers.get('X-Request-ID'));
         for (const limit of limits) this.recordLoginFailure(limit.scope, now + limit.window);
         return c.json({ success: false, error: '帳號或密碼錯誤，請重新確認' }, 401);
       }
@@ -339,6 +323,7 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
       this.ctx.storage.sql.exec('INSERT INTO sessions_v2 VALUES (?, ?, ?, ?, ?)',
         token, isAdmin ? 'admin' : 'invigilator', isAdmin ? matchedAdmin!.id : teacher!.id,
         now + SESSION_SECONDS * 1000, passwordRevision(isAdmin ? matchedAdmin!.password_hash : teacher?.passwordHash));
+      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO session_security VALUES (?, ?)', token, now);
       const session = this.getSession(token, state)!;
       this.recordAudit(session, 'login');
       await this.scheduleNextAlarm(state, now, false);
@@ -350,6 +335,31 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
         maxAge: SESSION_SECONDS
       });
       return c.json({ success: true, data: session });
+    });
+
+    this.router.post('/api/auth/reauth', async (c) => {
+      const session = c.get('session')!;
+      const admin = this.findAdmin(session.adminId!);
+      const password = c.get('body').password;
+      const now = Date.now();
+      const limits = [{ scope: `reauth:${session.adminId}`, ...ACCOUNT_FAILURES }];
+      const retry = this.loginRetryAfter(limits, now);
+      if (retry) {
+        this.securityAudit('rateLimited', session, 'reauth', c.res.headers.get('X-Request-ID'));
+        c.header('Retry-After', String(retry));
+        return c.json({ success: false, error: '驗證次數過多，請稍後再試' }, 429);
+      }
+      const valid = typeof password === 'string' && password.length <= MAX_PASSWORD_LENGTH &&
+        await verifyPassword(password.trim(), admin?.password_hash ?? DUMMY_PASSWORD_HASH);
+      if (!valid) {
+        this.recordLoginFailure(limits[0].scope, now + ACCOUNT_FAILURES.window);
+        this.securityAudit('loginFailed', session, 'reauth', c.res.headers.get('X-Request-ID'));
+        return c.json({ success: false, error: '驗證失敗，請確認目前管理員密碼' }, 401);
+      }
+      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO session_security VALUES (?, ?)', getCookie(c, sessionCookie(c.req.url))!, now);
+      this.ctx.storage.sql.exec('DELETE FROM login_failures WHERE scope = ?', limits[0].scope);
+      this.recordAudit(session, 'reauthenticate');
+      return c.json({ success: true });
     });
 
     this.router.post('/api/auth/logout', async (c) => {
@@ -397,11 +407,18 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
       if (c.req.header('Upgrade')?.toLowerCase() !== 'websocket') {
         return c.text('Expected WebSocket', 426);
       }
+      const ip = c.req.header('CF-Connecting-IP') || 'local';
+      const sockets = this.ctx.getWebSockets();
+      if (sockets.length >= 1024 || sockets.filter(socket => (socket.deserializeAttachment() as { ip?: string } | null)?.ip === ip).length >= 128) {
+        c.header('Retry-After', '60');
+        this.securityAudit('rateLimited', c.get('session'), 'websocket-quota', c.res.headers.get('X-Request-ID'));
+        return c.json({ success: false, error: '即時連線數已達上限，請關閉多餘分頁後重試' }, 429);
+      }
       const [client, server] = Object.values(new WebSocketPair());
       const state = c.get('state');
       const token = getCookie(c, sessionCookie(c.req.url));
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment(token ?? null);
+      server.serializeAttachment({ token: token ?? null, ip });
       const session = this.getSession(token, state);
       server.send(JSON.stringify({ event: 'INIT_STATE', payload: visibleState(state, session), session }));
       return new Response(null, { status: 101, webSocket: client });
@@ -410,13 +427,48 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
     this.router.route('/', api);
     this.router.notFound((c) => c.json({ success: false, error: '找不到此功能' }, 404));
     this.router.onError((error, c) => {
-      console.error(error);
+      console.error(JSON.stringify({ event: 'requestError', requestId: c.res.headers.get('X-Request-ID'), category: 'internal' }));
       return c.json({ success: false, error: '考務系統暫時無法處理請求' }, 500);
     });
   }
 
   fetch(request: Request) {
     return this.router.fetch(request);
+  }
+
+  private serializeRequest<T>(work: () => Promise<T>): Promise<T> {
+    this.pendingRequests++;
+    const task = this.requestQueue.then(work, work).finally(() => { this.pendingRequests--; });
+    this.requestQueue = task.then(() => undefined, () => undefined);
+    return task;
+  }
+
+  private socketToken(socket: WebSocket): string | null {
+    const saved = socket.deserializeAttachment();
+    return typeof saved === 'string' ? saved : saved?.token ?? null;
+  }
+
+  private admit(key: string, limit: number): boolean {
+    const now = Date.now();
+    for (const [entry, bucket] of this.readLimits) if (bucket.until <= now) this.readLimits.delete(entry);
+    let bucket = this.readLimits.get(key);
+    if (!bucket) {
+      if (this.readLimits.size >= 4096) return false;
+      bucket = { count: 0, until: now + 60_000 };
+      this.readLimits.set(key, bucket);
+    }
+    return ++bucket.count <= limit;
+  }
+
+  private securityAudit(action: AuditAction, session: ExamSession | null, category: string, requestId: string | null) {
+    const now = Date.now();
+    // Bound security log writes; structured warning allows platform alerting without secrets.
+    if (this.securityLogWindow.until <= now) this.securityLogWindow = { count: 0, until: now + 60_000 };
+    if (++this.securityLogWindow.count > 120) return;
+    const actor = session ? { ...session, username: session.adminId ?? session.teacherId ?? session.username } : { role: 'invigilator' as const, username: 'anonymous' };
+    this.recordAudit(actor, action, `${category}; request=${requestId ?? 'none'}`);
+    console.warn(JSON.stringify({ event: action, category, requestId, actor: actor.username }));
+    this.ctx.waitUntil(this.scheduleNextAlarm(createEmptyExamState(), now, false));
   }
 
   private loadPeriodAttendance(state: StoredExamState) {
@@ -430,9 +482,11 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
   }
 
   async alarm() {
-    await this.ctx.blockConcurrencyWhile(async () => {
+    await this.serializeRequest(async () => {
       const now = Date.now();
       this.ctx.storage.sql.exec('DELETE FROM audit_log WHERE expires_at <= ?', now);
+      this.ctx.storage.sql.exec('DELETE FROM session_security WHERE token NOT IN (SELECT token FROM sessions_v2 WHERE expires > ?)', now);
+      this.ctx.storage.sql.exec('DELETE FROM login_failures WHERE expires <= ?', now);
       const state = await this.ctx.storage.get<StoredExamState>(STATE_KEY);
       const credentialsPending = state ? await this.migrateCredentials(state) : false;
       await this.scheduleNextAlarm(state ?? createEmptyExamState(), now, credentialsPending);
@@ -563,7 +617,7 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
     });
     await this.scheduleNextAlarm(c.get('state'), Date.now(), false);
     for (const socket of this.ctx.getWebSockets()) {
-      const token = socket.deserializeAttachment() as string | null;
+      const token = this.socketToken(socket);
       if (token && !this.getSession(token, c.get('state'))) socket.close(1000, 'Session ended');
     }
     return c.json({ success: true, data: this.publicAdmins(currentId) });
@@ -623,15 +677,16 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
   private endSession(token: string | undefined) {
     if (!token) return;
     this.ctx.storage.sql.exec('DELETE FROM sessions_v2 WHERE token = ?', token);
+    this.ctx.storage.sql.exec('DELETE FROM session_security WHERE token = ?', token);
     for (const socket of this.ctx.getWebSockets()) {
-      if (socket.deserializeAttachment() === token) socket.close(1000, 'Session ended');
+      if (this.socketToken(socket) === token) socket.close(1000, 'Session ended');
     }
   }
 
   private broadcast({ event, payload }: ExamEvent, state: SystemData) {
     const now = Date.now();
     for (const socket of this.ctx.getWebSockets()) {
-      const token = socket.deserializeAttachment() as string | null;
+      const token = this.socketToken(socket);
       const session = this.getSession(token, state);
       if (token && !session) {
         socket.close(1000, 'Session ended');
@@ -691,6 +746,12 @@ export default {
     const secured = new Response(response.body, response);
     if (url.protocol === 'https:') secured.headers.set('Strict-Transport-Security', 'max-age=31536000');
     secured.headers.set('X-Content-Type-Options', 'nosniff');
+    const websocketOrigin = `${url.protocol === 'https:' ? 'wss:' : 'ws:'}//${url.host}`;
+    secured.headers.set('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ${websocketOrigin}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`);
+    secured.headers.set('X-Frame-Options', 'DENY');
+    secured.headers.set('Referrer-Policy', 'no-referrer');
+    secured.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=()');
+    if (pathname.startsWith('/api/')) secured.headers.set('Cache-Control', 'no-store');
     return secured;
   }
 } satisfies ExportedHandler<WorkerEnv>;

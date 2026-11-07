@@ -5,7 +5,7 @@ const pages = {
   basics: { title: '考試基本資料', description: '維護學校名稱、學期、段考名稱與考場守則。', icon: ClipboardList },
   grades: { title: '年級管理', description: '新增年級代碼與名稱，或調整既有年級。', icon: GraduationCap },
   classrooms: { title: '考場班級', description: '新增考場，調整班級、年級與應到人數。', icon: Building2 },
-  credentials: { title: '管理員帳號', description: '更新教務行政端的登入帳號與密碼。', icon: KeyRound }
+  credentials: { title: '管理員帳號', description: '更新教務管理中心的登入帳號與密碼。', icon: KeyRound }
 };
 
 export type AdminSettingsPage = keyof typeof pages;

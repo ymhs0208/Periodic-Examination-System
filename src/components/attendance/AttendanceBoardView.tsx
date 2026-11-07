@@ -10,6 +10,7 @@ import { ExamPeriodSelect } from '../ExamPeriodSelect';
 
 interface AttendanceBoardViewProps {
   data: SystemData;
+  initialMode?: 'school' | 'classroom';
   selectedClassroom: ClassroomExamState;
   onSelectClassroom: (classId: string) => void;
   onChooseClassroom: () => void;
@@ -54,8 +55,8 @@ function ReportStatus({ reported }: { reported: boolean }) {
   );
 }
 
-export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom, onChooseClassroom }: AttendanceBoardViewProps) {
-  const [mode, setMode] = useState<'school' | 'classroom'>('classroom');
+export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom, onChooseClassroom, initialMode = 'classroom' }: AttendanceBoardViewProps) {
+  const [mode, setMode] = useState<'school' | 'classroom'>(initialMode);
   const [requestedPeriodId, setRequestedPeriodId] = useState('');
   const [selectedGradeFilter, setGradeFilter] = useState('all');
   const [currentTime, setCurrentTime] = useState(() => new Date());

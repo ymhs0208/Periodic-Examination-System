@@ -76,7 +76,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               <GraduationCap size={17} aria-hidden="true" />考務工作台
             </p>
             <h1 id="login-title" className="text-[1.75rem] font-black leading-tight tracking-tight text-[#10243d] sm:text-4xl">
-              {isAdminLogin ? '教務行政登入' : intendedView === 'invigilator' ? '教師登入' : '登入考務帳號'}
+              {isAdminLogin ? '教務管理中心登入' : intendedView === 'invigilator' ? '教師登入' : '登入考務帳號'}
             </h1>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               {isAdminLogin ? '請使用教務管理員帳號登入。' : '請輸入教務處提供的帳號與密碼。'}
@@ -158,7 +158,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         </div>
 
         <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-white/15 pt-4 text-xs font-bold text-teal-100">
-          <span>監考點名</span><span>考場通報</span><span>教務行政</span>
+          <span>監考點名</span><span>考場通報</span><span>教務管理中心</span>
         </div>
       </aside>
     </div>

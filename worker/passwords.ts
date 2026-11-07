@@ -40,3 +40,6 @@ export function publicTeacher(teacher: StoredTeacher): TeacherAccount {
 export function adminState(state: StoredExamState): SystemData {
   return { ...state, teachers: state.teachers?.map(publicTeacher) };
 }
+
+// Fixed non-secret salt/key: always performs the same scrypt work for unknown/disabled accounts.
+export const DUMMY_PASSWORD_HASH = `scrypt$${SCRYPT_PARAMETERS}$${'0'.repeat(32)}$${'0'.repeat(64)}`;

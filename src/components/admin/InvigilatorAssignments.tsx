@@ -293,7 +293,7 @@ export function InvigilatorAssignments({ data, onManageTeachers, onOpenSchedule 
         )}
         <p role="status" className="mt-3 text-sm font-bold text-slate-600">顯示 {visible.length} 間考場</p>
         {visible.length ? (
-          <ul aria-label="考場監考指派清單" className="mt-2 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
+          <ul aria-label="監考指派清單" className="mt-2 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
             {visible.map((room) => {
               const teacher = teachersByRoom.get(room.classId);
               const action = teacher ? '更換老師' : '指派老師';

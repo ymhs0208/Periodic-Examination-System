@@ -68,7 +68,7 @@ export function ScheduledInvigilatorView({ tab, correctionSubmission, ...props }
           <section ref={attendanceSection} tabIndex={-1} className="min-w-0 rounded-xl bg-white p-3 text-slate-900 sm:p-4" aria-label="點名節次">
             <ExamPeriodSelect periods={periods} value={selected?.id ?? ''} onChange={selectPeriod} autoLabel="自動選擇目前考試" />
             <p className="mt-2 text-sm font-bold text-slate-700">
-              {period ? `點名節次 · ${periodLabel(period)}` : periods.length ? '目前不是考試時段，請選擇要回報的節次。' : '此班目前沒有可點名的考程。'}
+              {period ? `點名節次 · ${periodLabel(period)}` : periods.length ? '目前不是考試時段，請選擇要回報的節次。' : examPeriods(props.config).length ? '本帳號沒有此班適用的點名節次，請聯絡教務確認監考指派。' : '尚未建立考程，請聯絡教務建立後再點名。'}
             </p>
           </section>
         }
@@ -142,7 +142,19 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
 }) => {
   const { confirmAction, confirmationDialog } = useActionConfirmation();
   const attendanceRecord = classroomForPeriod(classroom, period);
-  const [absentStudents, setAbsentStudents] = useState<AbsentStudent[]>(attendanceRecord.absentStudents);
+  const draftKey = `exam-attendance-draft:${classroom.classId}:${period?.id ?? 'none'}`;
+  const initialDraft = useRef<{ absentStudents: AbsentStudent[]; version: string | null } | null>(null);
+  const draftLoaded = useRef(false);
+  if (!draftLoaded.current) {
+    draftLoaded.current = true;
+    try { initialDraft.current = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch { /* storage unavailable */ }
+  }
+  const [absentStudents, setAbsentStudents] = useState<AbsentStudent[]>(initialDraft.current?.absentStudents ?? attendanceRecord.absentStudents);
+  const baseVersion = useRef<string | null>(initialDraft.current ? initialDraft.current.version : attendanceRecord.statusReported ? attendanceRecord.lastUpdated : null);
+  const baseStudents = useRef(attendanceRecord.absentStudents);
+  const [remoteConflict, setRemoteConflict] = useState(false);
+  const dirty = useRef(!!initialDraft.current);
+  const [draftWarning, setDraftWarning] = useState('');
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
   const [attendanceSavedMessage, setAttendanceSavedMessage] = useState(false);
   const [attendanceError, setAttendanceError] = useState('');
@@ -165,8 +177,34 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   const [issueError, setIssueError] = useState('');
 
   useEffect(() => {
+    const version = attendanceRecord.statusReported ? attendanceRecord.lastUpdated : null;
+    if (version === baseVersion.current) return;
+    if (dirty.current) { setRemoteConflict(true); return; }
+    baseVersion.current = version;
+    baseStudents.current = attendanceRecord.absentStudents;
     setAbsentStudents(attendanceRecord.absentStudents);
   }, [classroom.classId, attendanceRecord.statusReported, attendanceRecord.lastUpdated]);
+
+  useEffect(() => {
+    const changed = JSON.stringify(absentStudents) !== JSON.stringify(baseStudents.current) || !!initialDraft.current;
+    dirty.current = changed;
+    try {
+      if (changed) sessionStorage.setItem(draftKey, JSON.stringify({ absentStudents, version: baseVersion.current }));
+      else sessionStorage.removeItem(draftKey);
+    } catch { if (changed) setDraftWarning('瀏覽器無法保留草稿，離開本頁前請先送出點名。'); }
+    const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty.current) { event.preventDefault(); event.returnValue = ''; } };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [absentStudents, draftKey]);
+
+  const reloadAttendance = () => {
+    if (!window.confirm('捨棄本機草稿，重新載入伺服器最新點名？')) return;
+    initialDraft.current = null; dirty.current = false;
+    baseVersion.current = attendanceRecord.statusReported ? attendanceRecord.lastUpdated : null;
+    baseStudents.current = attendanceRecord.absentStudents;
+    setAbsentStudents(attendanceRecord.absentStudents); setRemoteConflict(false);
+    try { sessionStorage.removeItem(draftKey); } catch { /* no storage */ }
+  };
 
   useEffect(() => {
     setEditGrade(classroom.grade);
@@ -213,6 +251,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     if (existingIndex >= 0) {
       setAbsentStudents(absentStudents.filter((s) => s.seatNo !== seatNo));
     } else {
+      if (absentStudents.length >= attendanceRecord.expectedCount) { setAttendanceError('缺席人數不可超過應到人數；座位數不代表本節應到人數。'); return; }
       const updated = [
         ...absentStudents,
         {
@@ -233,8 +272,10 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
 
   const handleSaveAttendance = async () => {
     if (isSubmittingAttendance || !period) return;
+    if (remoteConflict) { setAttendanceError('已有較新的點名，請先核對並重新載入。'); return; }
+    if (absentCount > expectedCount) { setAttendanceError(`缺席 ${absentCount} 人超過應到 ${expectedCount} 人，請取消多選的座號。`); return; }
     lockPeriod();
-    const attendance = { classId: classroom.classId, periodId: period.id, expectedPeriod: period, expectedCount, presentCount, absentCount, absentStudents };
+    const attendance = { classId: classroom.classId, periodId: period.id, expectedPeriod: period, expectedLastUpdated: baseVersion.current, expectedCount, presentCount, absentCount, absentStudents };
     if (!await confirmAction({
       title: '確認送出點名',
       description: '請核對人數、缺席座號及假別。',
@@ -254,7 +295,12 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
     setAttendanceSavedMessage(false);
     setIsSubmittingAttendance(true);
     try {
-      await examSync.updateAttendance(attendance);
+      const saved = await examSync.updateAttendance(attendance);
+      baseVersion.current = saved.lastUpdated;
+      baseStudents.current = saved.absentStudents;
+      initialDraft.current = null; dirty.current = false;
+      setAbsentStudents(saved.absentStudents); setRemoteConflict(false);
+      try { sessionStorage.removeItem(draftKey); } catch { /* no storage */ }
       setAttendanceSavedMessage(true);
       setTimeout(() => setAttendanceSavedMessage(false), 4000);
     } catch (error) {
@@ -318,6 +364,11 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
   return (
     <div className="min-w-0 space-y-4">
       {confirmationDialog}
+      {draftWarning && <p role="alert" className="rounded-xl bg-amber-50 p-3">{draftWarning}</p>}
+      {(remoteConflict || initialDraft.current) && <div role="alert" className="rounded-xl bg-amber-50 p-3 text-sm font-bold">
+        {remoteConflict ? '伺服器已有較新的點名，本機草稿未被覆蓋。請先核對最新紀錄，再重新載入。' : '已恢復本班本節未送出的草稿。'}
+        <button type="button" onClick={reloadAttendance} className="ml-3 underline">捨棄草稿並載入最新點名</button>
+      </div>}
       <p role="status" className="sr-only">
         {currentAnnouncements[0] ? `最新考務公告：${currentAnnouncements[0].title}` : ''}
       </p>
@@ -388,7 +439,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
               <h2 id="invigilator-attendance-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
                 <ClipboardCheck size={20} className="text-teal-800" aria-hidden="true" />座號點名
               </h2>
-              <p className="mt-1 text-sm text-slate-700">點選缺席座號，再登記假別並核對送出。</p>
+              <p className="mt-1 text-sm text-slate-700">只標記缺席，其餘視為到齊；送出後才正式回報。假別選填。草稿依班級與節次保留於本分頁。</p>
             </div>
             {period && <p className={`rounded-full px-2.5 py-1 text-xs font-bold ${reportStatus === '本節已回報' ? 'bg-teal-100 text-teal-950' : 'bg-amber-100 text-amber-950'}`}>{reportStatus}</p>}
           </div>
@@ -430,7 +481,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
                         <button key={seat} type="button" onClick={() => handleToggleSeat(seat)} aria-pressed={isAbsent} disabled={isSubmittingAttendance}
                           className={`flex min-h-12 flex-col items-center justify-center rounded-lg border px-0.5 font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:opacity-60 ${isAbsent ? 'border-rose-400 bg-rose-100 text-rose-950 hover:bg-rose-200' : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-teal-300 hover:bg-teal-50'}`}>
                           <span className="font-mono text-base font-black leading-none tabular-nums sm:text-lg"><span className="sr-only">座號 </span>{String(seat).padStart(2, '0')}</span>
-                          <span className="mt-1 text-[10px] leading-none">{isAbsent ? '缺席' : '未標記'}</span>
+                          <span className="mt-1 text-[10px] leading-none">{isAbsent ? '缺席' : '未列缺席'}</span>
                         </button>
                       );
                     })}
@@ -452,7 +503,7 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
                               setAbsentStudents((students) => students.map((item) => item.seatNo === student.seatNo ? { ...item, reason } : item));
                             }}
                             className="min-h-10 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-1.5 text-sm text-slate-900">
-                            <option value="">未選擇假別</option>
+                            <option value="">假別選填（未註明）</option>
                             {student.reason && !ABSENCE_REASONS.includes(student.reason) && <option value={student.reason}>{student.reason}</option>}
                             {ABSENCE_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
                           </select>
@@ -475,10 +526,10 @@ const InvigilatorView: React.FC<InvigilatorViewProps & {
                   </button>
                 </div>
                 {attendanceError && <p role="alert" className="rounded-lg bg-rose-100 p-2 text-sm font-bold text-rose-950">{attendanceError}</p>}
-                {attendanceSavedMessage && <p role="status" className="rounded-lg bg-teal-100 p-2 text-sm font-bold text-teal-950">點名已送出，電子黑板與教務端已同步。</p>}
+                {attendanceSavedMessage && <p role="status" className="rounded-lg bg-teal-100 p-2 text-sm font-bold text-teal-950">伺服器已儲存點名；其他看板將於連線正常時更新。</p>}
               </div>
             </>
-          ) : <p className="p-4 text-sm text-slate-700">選擇考試節次後即可點名。</p>}
+          ) : <p className="p-4 text-sm text-slate-700">尚未選定節次。請查看上方考程或監考指派提示；沒有可用選項時請聯絡教務。</p>}
         </section>
       )}
       {tab === 'announcements' && (

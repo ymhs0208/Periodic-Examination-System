@@ -9,12 +9,13 @@
     "start": "wrangler dev --port 3000",
     "preview": "npm run dev",
     "deploy": "npm run build && wrangler deploy",
-    "lint": "wrangler types && tsc --noEmit"
+    "lint": "wrangler types && tsc --noEmit",
+    "test:security": "node --test tests/security.test.mjs tests/security-worker.test.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
-    "hono": "^4.13.16",
+    "hono": "~4.13.17",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",

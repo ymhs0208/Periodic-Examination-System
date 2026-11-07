@@ -28,7 +28,7 @@ export function ExamPeriodSelect({ periods, value, onChange, autoLabel }: {
   return (
     <label className="block min-w-0 max-w-lg text-sm font-bold text-slate-800">
       考試節次
-      <select value={value} onChange={(event) => onChange(event.target.value)}
+      <select disabled={!periods.length} value={value} onChange={(event) => onChange(event.target.value)}
         className="mt-1 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-2 text-sm text-slate-950">
         <option value="">{autoLabel}</option>
         {periods.map((period) => <option key={period.id} value={period.id}>{periodLabel(period)}</option>)}

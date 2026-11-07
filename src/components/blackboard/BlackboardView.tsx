@@ -185,7 +185,7 @@ export const BlackboardView: React.FC<BlackboardViewProps> = ({
           }`}>
           {/* 區塊 A：考場出席人數即時看板 */}
           {isFullscreen ? <>
-            <ProjectionAttendance classroom={classroom} absences={absentSeats} />
+            {period && <ProjectionAttendance classroom={classroom} absences={absentSeats} />}
             {!period && <ProjectionSchedule periods={todaysPeriods} nextPeriod={nextPeriod} time={taipeiTime} />}
           </> : period ? <div className="flex-1 bg-white rounded-2xl border border-slate-200/90 p-3.5 sm:p-4 lg:p-5 flex flex-col justify-between gap-3 shadow-2xs">
             {/* 標題列 */}

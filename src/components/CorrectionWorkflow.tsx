@@ -88,7 +88,7 @@ export function CorrectionSubmission({ data, teacherId, assignments }: {
       <h2 id="correction-submission-title" className="flex items-center gap-2 text-xl font-black text-slate-950">
         <FilePenLine size={22} className="text-teal-800" aria-hidden="true" />試題更正送審
       </h2>
-      <p className="mt-1 text-sm leading-6 text-slate-700">選擇教務處指派的科目與年級。核准後，更正通知會顯示在該年級的考場。</p>
+      <p className="mt-1 text-sm leading-6 text-slate-700">選擇教務處指派的科目與年級。核准後會顯示在該年級所有考場；考科僅為標籤，不依目前考科篩選，持續至教務撤回或設定的顯示結束時間。</p>
       <div className="mt-4 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <form onSubmit={submit} className="min-w-0 space-y-3">
           <label className="block min-w-0 text-sm font-bold text-slate-800">出題科目與年級

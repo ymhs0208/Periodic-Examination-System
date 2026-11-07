@@ -17,6 +17,7 @@ import { CorrectionSubmission } from './components/CorrectionWorkflow';
 import { PolicyPage, type PolicyView } from './components/PolicyPage';
 import { AdminView, type AdminTab } from './components/admin/AdminView';
 import { adminSettingsPath, adminSettingsTitle, parseAdminSettingsPage, type AdminSettingsPage } from './components/admin/AdminSettingsNavigation';
+import { SecurityReauth } from './components/auth/SecurityReauth';
 import { LoginPage } from './components/auth/LoginPage';
 import { RequestActivity, SystemFeedback } from './components/SystemFeedback';
 import { examSync, type LiveConnection } from './services/examSync';
@@ -28,7 +29,7 @@ const pageTitles: Record<ActiveView, string> = {
   blackboard: '教室電子黑板',
   attendance: '出席即時看板',
   invigilator: '教師工作台',
-  admin: '教務行政',
+  admin: '教務管理中心',
   login: '登入',
   privacy: '隱私政策',
   disclaimer: '免責聲明'
@@ -506,6 +507,7 @@ export default function App() {
         isZeroScrollBoard ? 'lg:h-screen lg:overflow-hidden' : ''
       }`}
     >
+      <SecurityReauth />
       <a href="#main-content" className="skip-to-main no-print" onClick={(event) => {
         event.preventDefault();
         mainRef.current?.focus();
@@ -586,24 +588,29 @@ export default function App() {
             )}
 
             {/* 獨立路徑 2: /attendance (考場出席人數即時看板 - 全螢幕免滾動) */}
-            {boardView === 'attendance' && boardClassroom && (
+            {boardView === 'attendance' && (boardClassroom || (window.location.pathname === '/attendance/school' && systemData.classrooms.length > 0)) && (
               <div className="w-full flex-1 min-h-0 flex flex-col lg:overflow-hidden">
                 <AttendanceBoardView
                   data={systemData}
-                  selectedClassroom={boardClassroom}
+                  key={window.location.pathname}
+                  initialMode={window.location.pathname === '/attendance/school' ? 'school' : 'classroom'}
+                  selectedClassroom={boardClassroom ?? systemData.classrooms[0]}
                   onSelectClassroom={(classId) => navigateToBoardClass('attendance', classId)}
                   onChooseClassroom={() => navigateToView('attendance')}
                 />
               </div>
             )}
 
-            {boardView && !boardClassroom && (
+            {boardView && !boardClassroom && (window.location.pathname !== '/attendance/school' || !systemData.classrooms.length) && (
+              <>
+              {boardView === 'attendance' && <a href="/attendance/school" className="mb-4 block rounded-xl bg-teal-800 p-4 text-center font-bold text-white">開啟全校總覽</a>}
               <ClassroomPicker
                 board={boardView}
                 classrooms={systemData.classrooms}
                 config={systemData.config}
                 onSelectClassroom={(classId) => navigateToBoardClass(boardView, classId)}
               />
+              </>
             )}
 
             {/* 獨立路徑 3: /invigilator (監考老師點名端) */}

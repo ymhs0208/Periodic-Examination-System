@@ -69,7 +69,7 @@ export function AdminAccountsSettings() {
     }
     if (!await confirmAction({
       title: editing === 'new' ? '確認新增管理員帳號' : '確認更新管理員帳號',
-      description: editing === 'new' ? '此帳號會取得教務行政端的完整管理權限。'
+      description: editing === 'new' ? '此帳號會取得教務管理中心的完整管理權限。'
         : secret ? '重設密碼會結束此帳號的其他登入。' : undefined,
       facts: [
         { label: '管理員帳號', value: name },
@@ -86,7 +86,7 @@ export function AdminAccountsSettings() {
     const enabled = !account.enabled;
     if (!await confirmAction({
       title: enabled ? '確認啟用管理員帳號' : '確認停用管理員帳號',
-      description: enabled ? '啟用後可重新登入教務行政端。' : '停用後，此帳號目前的登入會結束。',
+      description: enabled ? '啟用後可重新登入教務管理中心。' : '停用後，此帳號目前的登入會結束。',
       facts: [{ label: '管理員帳號', value: account.username }],
       confirmLabel: enabled ? '確認啟用' : '確認停用',
       danger: !enabled

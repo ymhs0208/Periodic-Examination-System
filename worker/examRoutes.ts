@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { ExamVariables } from './worker';
 import type { ClassroomExamState, CorrectionProposal, ExamAnnouncement, ExamAttendance, ExamAuthorAssignment, ExamIssue, ExamPeriod, SystemData, TeacherAccountInput } from '../src/types/exam';
-import { MAX_EXAM_AUTHOR_ASSIGNMENTS } from '../src/types/exam';
+import { MAX_EXAM_AUTHOR_ASSIGNMENTS, validTeacherPassword } from '../src/types/exam';
 import { comparePeriods, examPeriods, invigilatorForPeriod, isExamDate, isExamTime, LEGACY_PERIOD_ID, periodApplies, periodLabel, periodScopesOverlap, periodTimesOverlap, scheduledExamSubjects } from '../src/types/examSchedule';
 import { announcementStatus } from '../src/types/announcements';
 import { adminState, hashPassword, MAX_PASSWORD_LENGTH, type StoredTeacher } from './passwords';
@@ -48,13 +48,23 @@ api.post('/api/exam/teachers/import', async (c) => {
     return c.json({ success: false, error: '每次最多匯入 50 筆教師資料，請分批匯入' }, 400);
   }
 
-  const currentTeachers: StoredTeacher[] =
-    mode === 'replace' ? [] : [...(state.teachers || [])];
+  const previousTeachers = state.teachers || [];
+  if (mode === 'replace') {
+    const retained = new Set(teachers.map((teacher) => String(teacher.username || '').trim()));
+    const removed = previousTeachers.filter((teacher) => !retained.has(teacher.username));
+    if (removed.some((teacher) => teacher.examAuthorAssignments?.length || teacher.assignedClassId ||
+      state.classrooms.some((room) => Object.values(room.periodInvigilators ?? {}).includes(teacher.id)))) {
+      return c.json({ success: false, error: '覆蓋名冊將移除仍有預設考場、分節監考或出題指派的教師。請先解除相關指派，或改用合併模式。' }, 409);
+    }
+  }
+  const currentTeachers: StoredTeacher[] = mode === 'replace'
+    ? previousTeachers.filter((teacher) => teachers.some((raw) => String(raw.username || '').trim() === teacher.username)).map((teacher) => ({ ...teacher }))
+    : previousTeachers.map((teacher) => ({ ...teacher }));
 
   if (teachers.some((teacher) => !teacher || !String(teacher.name || '').trim() ||
     !String(teacher.username || '').trim() || typeof teacher.password !== 'string' ||
-    !teacher.password.trim() || teacher.password.trim().length > MAX_PASSWORD_LENGTH)) {
-    return c.json({ success: false, error: '每筆教師資料皆須填寫姓名、登入帳號與密碼' }, 400);
+    !validTeacherPassword(teacher.password))) {
+    return c.json({ success: false, error: '每筆須填寫姓名、帳號與至少 12 字元的非簡單密碼（最多 256 字元）' }, 400);
   }
 
   for (const raw of teachers as TeacherAccountInput[]) {
@@ -119,8 +129,8 @@ api.post('/api/exam/teachers', async (c) => {
   const cleanDept = String(department || '').trim() || '專任教師';
   const cleanClassId = String(assignedClassId || '').trim();
 
-  if (!cleanName || !cleanUsername || (!id && !cleanPassword) || cleanPassword.length > MAX_PASSWORD_LENGTH) {
-    return c.json({ success: false, error: '請填寫教師姓名、獨立登入帳號與密碼' }, 400);
+  if (!cleanName || !cleanUsername || (!id && !validTeacherPassword(cleanPassword)) || (cleanPassword && !validTeacherPassword(cleanPassword))) {
+    return c.json({ success: false, error: '請填寫姓名、帳號；新增或重設密碼須為 12 至 256 字元且不可過於簡單' }, 400);
   }
   state.teachers = state.teachers || [];
   const target = state.teachers.find((teacher) => teacher.id === id);
@@ -319,7 +329,7 @@ api.delete('/api/exam/teachers/:id', (c) => {
 api.post('/api/exam/attendance', (c) => {
   const state = c.get('state');
   const broadcast = c.get('broadcast');
-  const { classId, periodId, expectedPeriod, expectedCount, presentCount, absentCount, absentStudents } = c.get('body');
+  const { classId, periodId, expectedPeriod, expectedLastUpdated, expectedCount, presentCount, absentCount, absentStudents } = c.get('body');
   const classroom = state.classrooms.find((c) => c.classId === classId);
 
   if (!classroom) {
@@ -337,9 +347,9 @@ api.post('/api/exam/attendance', (c) => {
     return c.json({ success: false, error: '考試節次已更新，請重新核對後再送出點名' }, 409);
   }
 
-  if (!Number.isSafeInteger(expectedCount) || expectedCount < 1 ||
-    !Number.isSafeInteger(presentCount) || presentCount < 0 ||
-    !Number.isSafeInteger(absentCount) || absentCount < 0 ||
+  if (!Number.isSafeInteger(expectedCount) || expectedCount < 1 || expectedCount > 10000 ||
+    !Number.isSafeInteger(presentCount) || presentCount < 0 || presentCount > 10000 ||
+    !Number.isSafeInteger(absentCount) || absentCount < 0 || absentCount > 10000 ||
     expectedCount !== presentCount + absentCount ||
     !Array.isArray(absentStudents) || absentStudents.length !== absentCount ||
     absentStudents.some((student) => !student ||
@@ -350,11 +360,16 @@ api.post('/api/exam/attendance', (c) => {
     return c.json({ success: false, error: '出缺席人數或座號資料有誤' }, 400);
   }
 
+  const currentRecord = period && state.config.periods !== undefined ? classroom.periodAttendance?.[period.id] : classroom;
+  const currentVersion = currentRecord?.statusReported ? currentRecord.lastUpdated : null;
+  if (expectedLastUpdated !== currentVersion) {
+    return c.json({ success: false, error: '此班本節點名已由其他人更新，請保留草稿並重新載入核對後再送出。' }, 409);
+  }
   const attendance: ExamAttendance = {
     expectedCount, presentCount, absentCount,
     absentStudents: absentStudents.map(({ seatNo, name, reason }) => ({ seatNo, name, reason })),
     statusReported: true,
-    lastUpdated: new Date().toISOString()
+    lastUpdated: new Date(Math.max(Date.now(), Date.parse(currentVersion || '') + 1 || 0)).toISOString()
   };
   if (period && state.config.periods !== undefined) {
     broadcast('PERIOD_ATTENDANCE_UPDATED', { classId, periodId: period.id, attendance });
@@ -428,7 +443,7 @@ api.patch('/api/exam/classroom/:classId', (c) => {
   }
 
   if (expectedCount !== undefined) {
-    const nextExpected = Math.max(1, Number(expectedCount));
+    const nextExpected = expectedCount;
     classroom.expectedCount = nextExpected;
     classroom.presentCount = Math.max(0, nextExpected - classroom.absentCount);
     if (nextExpected > classroom.totalSeats) {
@@ -436,7 +451,7 @@ api.patch('/api/exam/classroom/:classId', (c) => {
     }
   }
   if (totalSeats !== undefined) {
-    classroom.totalSeats = Math.max(classroom.expectedCount, Number(totalSeats));
+    classroom.totalSeats = totalSeats;
   }
   classroom.lastUpdated = new Date().toISOString();
 
@@ -492,15 +507,16 @@ api.post('/api/exam/classroom', (c) => {
     existing.invigilator = resolvedInvigilator || existing.invigilator;
     if (resolvedUsername) existing.invigilatorUsername = resolvedUsername;
     if (expectedCount !== undefined) {
-      existing.expectedCount = Math.max(1, Number(expectedCount));
+      existing.expectedCount = expectedCount;
       existing.presentCount = Math.max(0, existing.expectedCount - existing.absentCount);
+      existing.totalSeats = Math.max(existing.totalSeats, existing.expectedCount);
     }
     existing.lastUpdated = new Date().toISOString();
     broadcast('INIT_STATE', state);
     return c.json({ success: true, data: existing });
   }
 
-  const exp = Math.max(1, Number(expectedCount) || 30);
+  const exp = expectedCount ?? 30;
   const newClassroom: ClassroomExamState = {
     classId: normalizedId,
     grade: nextGrade,
@@ -740,7 +756,7 @@ api.post('/api/exam/announcement/:id/read', (c) => {
 api.patch('/api/exam/config', (c) => {
   const state = c.get('state');
   const broadcast = c.get('broadcast');
-  const { gradeLabels: _gradeLabels, periods: _periods, ...updates } = c.get('body');
+  const updates = c.get('body'); // Field whitelist validated by the Worker before this route.
   state.config = { ...state.config, ...updates };
   if (state.config.periods === undefined && ['examDate', 'startTime', 'endTime', 'subject'].some((key) => key in updates)) broadcast('INIT_STATE', state);
   else broadcast('CONFIG_UPDATED', state.config);
