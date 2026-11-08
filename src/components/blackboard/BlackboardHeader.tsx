@@ -59,7 +59,7 @@ export function BlackboardHeader({
   );
 
   return (
-    <header className={`projection-header${announcementFocus ? ' projection-header-focus' : ''}`}>
+    <header className={`projection-header view-header-banner${announcementFocus ? ' projection-header-focus' : ''}`}>
       <div className="projection-toolbar">
         <div className="projection-brand">
           <span className="projection-brand-icon"><BookOpen size={17} aria-hidden="true" /></span>

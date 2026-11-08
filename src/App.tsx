@@ -465,7 +465,7 @@ export default function App() {
     const [, oldView, oldClass] = previous.split('/');
     const [, newView, newClass] = currentPath.split('/');
     const sameBoard = oldView === newView && (newView === 'blackboard' || newView === 'attendance');
-    if (sameBoard && oldClass && newClass) return;
+    if (sameBoard && (newView === 'attendance' || (oldClass && newClass))) return;
     mainRef.current?.focus();
   }, [currentPath]);
 
@@ -546,6 +546,7 @@ export default function App() {
 
   return (
     <div
+      data-header-tone={activeView === 'admin' ? 'admin' : activeView === 'invigilator' ? 'teacher' : 'board'}
       className="min-h-screen bg-[#f4f6fb] text-slate-900 flex flex-col font-sans selection:bg-blue-700 selection:text-white"
     >
       <SecurityReauth />
@@ -579,7 +580,7 @@ export default function App() {
         tabIndex={-1}
         className="flex-1 max-w-[1720px] w-full mx-auto px-2.5 sm:px-5 lg:px-8 py-4 sm:py-6"
       >
-        {logoutError && <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-900">
+        {logoutError && <div role="alert" className="no-print mb-3 flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-900">
           <p>登出未確認。{logoutError}</p>
           <button type="button" className="min-h-10 shrink-0 px-2" onClick={() => setLogoutError('')}>關閉</button>
         </div>}
@@ -598,7 +599,7 @@ export default function App() {
         ) : (
           <>
             {connectionMessage && !showWorkbench && !viewingClassroomBoard && activeView !== 'academic' && activeView !== 'login' && (
-              <p role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-950">{connectionMessage}</p>
+              <p role="status" className="no-print mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-950">{connectionMessage}</p>
             )}
             {/* 獨立路徑 0: /login (獨立登入頁面) */}
             {activeView === 'login' && (
@@ -630,16 +631,15 @@ export default function App() {
               </div>
             )}
 
-            {/* 獨立路徑 2: /attendance (考場出席人數即時看板 - 全螢幕免滾動) */}
+            {/* 獨立路徑 2: /attendance (考場出席人數即時看板) */}
             {boardView === 'attendance' && (boardClassroom || ((currentPath === '/attendance' || currentPath === '/attendance/school') && systemData.classrooms.length > 0)) && (
               <div className="w-full flex-1 min-h-0 flex flex-col lg:overflow-hidden">
                 <AttendanceBoardView
                   data={systemData}
-                  key={currentPath}
-                  initialMode={boardClassroom ? 'classroom' : 'school'}
+                  mode={boardClassroom ? 'classroom' : 'school'}
                   selectedClassroom={boardClassroom ?? systemData.classrooms[0]}
                   onSelectClassroom={(classId) => navigateToBoardClass('attendance', classId)}
-                  onChooseClassroom={() => navigateToView('attendance')}
+                  onShowSchool={() => navigateToView('attendance')}
                 />
               </div>
             )}

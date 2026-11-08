@@ -1,4 +1,4 @@
-import { formatTaipeiClock, formatTaipeiDateTime, serverNow, serverNowMs, taipeiDateStamp } from '../../types/time';
+import { formatTaipeiDateTime, serverNow, serverNowMs, taipeiDateStamp } from '../../types/time';
 import { parseDelimited } from '../../services/parseDelimited';
 import { validTeacherPassword, MIN_TEACHER_PASSWORD_LENGTH } from '../../types/exam';
 import React, { useState, useEffect, useRef } from 'react';
@@ -18,12 +18,11 @@ import {
   Trash2,
   Search,
   Settings,
-  HeartPulse,
   FileText,
-  Wrench,
   Check,
-  Maximize2,
-  Minimize2,
+  ArrowDown,
+  ArrowDownUp,
+  ArrowUp,
   LayoutGrid,
   List,
   Upload,
@@ -43,6 +42,7 @@ import { AdminSettingsNavigation, type AdminSettingsPage } from './AdminSettings
 import { AdminAccountsSettings } from './AdminAccountsSettings';
 import { ExamResetSettings } from './ExamResetSettings';
 import { AuditLogView } from './AuditLogView';
+import { AdminIssueDesk } from './AdminIssueDesk';
 import { ExamPeriodSelect, useExamClock } from '../ExamPeriodSelect';
 import { dataForPeriod, periodLabel, preferredPeriod, reportingPeriods, scheduledExamSubjects, invigilatorForPeriod, examPeriods, periodApplies } from '../../types/examSchedule';
 import { InvigilatorAssignments } from './InvigilatorAssignments';
@@ -61,7 +61,9 @@ import type {
   IssueStatus,
   AnnouncementType,
   ExamAnnouncement,
-  ExamConfig
+  ExamConfig,
+  ExamIssue,
+  ClassroomExamState
 } from '../../types/exam';
 
 export type AdminTab =
@@ -100,7 +102,7 @@ const broadcastPanels = [
 const announcementTypes = {
   correction: { label: '試題更正', badge: 'bg-amber-100 text-amber-950' },
   extension: { label: '時間延長', badge: 'bg-sky-100 text-sky-950' },
-  notice: { label: '一般提醒', badge: 'bg-teal-100 text-teal-950' },
+  notice: { label: '一般提醒', badge: 'bg-violet-100 text-violet-950' },
   emergency: { label: '緊急公告', badge: 'bg-rose-100 text-rose-950' }
 };
 const announcementStates = {
@@ -110,10 +112,24 @@ const announcementStates = {
 };
 const broadcastField = 'mt-1.5 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-950 sm:text-sm';
 const broadcastCard = 'min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6';
-const teacherAction = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 hover:border-teal-300 hover:bg-teal-50 disabled:opacity-50';
-const teacherPrimary = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-teal-800 px-3 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50';
+const teacherAction = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 hover:border-violet-300 hover:bg-violet-50 disabled:opacity-50';
+const teacherPrimary = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-violet-800 px-3 text-sm font-bold text-white hover:bg-violet-900 disabled:opacity-50';
 const teacherRowColumns = 'xl:grid-cols-[minmax(0,1.25fr)_minmax(0,.75fr)_minmax(0,1fr)_minmax(0,1.4fr)_10rem]';
 const teacherInput = 'block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-950 sm:text-sm';
+const matrixFilterField = 'block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-950';
+const settingsField = 'mt-1.5 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-950 focus-visible:outline-2 focus-visible:outline-violet-700 disabled:bg-slate-100';
+const matrixSortFields = {
+  classId: '考場班級',
+  invigilator: '監考教師',
+  statusReported: '點名狀態',
+  expectedCount: '應到',
+  presentCount: '實到',
+  absentCount: '缺席',
+  issue: '考場即時狀況'
+};
+type MatrixSortField = keyof typeof matrixSortFields;
+type MatrixFilter = 'all' | 'yes' | 'no';
+const matrixCollator = new Intl.Collator('zh-TW', { numeric: true });
 
 function parseAnnouncementTime(value: string) {
   if (!value) return undefined;
@@ -194,47 +210,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [isReplying, setIsReplying] = useState<boolean>(false);
   const [replyFeedback, setReplyFeedback] = useState<{ issueId: string; error: boolean; text: string }>();
 
-  // Matrix Filter & Fullscreen Zero-Scroll Attendance Wall
+  // Classroom board filters and table sorting
   const [requestedGradeFilter, setGradeFilter] = useState('all');
   const gradeFilter = validGradeFilter(requestedGradeFilter);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [matrixAttendanceFilter, setMatrixAttendanceFilter] = useState<MatrixFilter>('all');
+  const [matrixIssueFilter, setMatrixIssueFilter] = useState<MatrixFilter>('all');
+  const [matrixSort, setMatrixSort] = useState<{ field: MatrixSortField; ascending: boolean }>();
   const [matrixDisplayMode, setMatrixDisplayMode] = useState<'grid' | 'table'>('table');
-  const [isAttendanceWallFullscreen, setIsAttendanceWallFullscreen] = useState<boolean>(false);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isAttendanceWallFullscreen) {
-        setIsAttendanceWallFullscreen(false);
-        if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAttendanceWallFullscreen]);
-
-  const [fullscreenNote, setFullscreenNote] = useState('');
-  const [wallPage, setWallPage] = useState(0);
-  useEffect(() => {
-    const changed = () => { if (!document.fullscreenElement) setIsAttendanceWallFullscreen(false); };
-    document.addEventListener('fullscreenchange', changed);
-    return () => document.removeEventListener('fullscreenchange', changed);
-  }, []);
-  useEffect(() => { setWallPage(0); }, [gradeFilter, searchQuery, matrixDisplayMode, selectedPeriod?.id]);
-  const toggleAttendanceWallFullscreen = () => {
-    const next = !isAttendanceWallFullscreen;
-    setIsAttendanceWallFullscreen(next);
-    if (next) {
-      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => setFullscreenNote('瀏覽器未允許全螢幕，目前為頁內放大模式。'));
-      }
-    } else {
-      if (document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
-      }
-    }
-  };
 
   // Settings State (Exam Config + Classroom/Invigilator Config)
   const [configForm, setConfigForm] = useState<ExamConfig>(sourceData.config);
@@ -549,12 +532,57 @@ export const AdminView: React.FC<AdminViewProps> = ({
     (!issuePeriodFilter || (issue.periodId ? `period:${issue.periodId}` : 'unassigned') === issuePeriodFilter));
   const selectedIssue = filteredIssues.find((issue) => issue.id === selectedIssueId);
 
-  // Filtered Classrooms for Matrix
-  const filteredClassrooms = data.classrooms.filter((c) => {
-    if (gradeFilter !== 'all' && c.grade.toString() !== gradeFilter) return false;
-    if (searchQuery && !c.className.includes(searchQuery) && !c.invigilator.includes(searchQuery)) return false;
-    return true;
-  });
+  function openIssueForClass(classId: string, issue?: ExamIssue) {
+    setSelectedIssueId(issue?.id ?? null);
+    setIssueClassFilter(classId);
+    setIssuePeriodFilter(issue?.periodId ? `period:${issue.periodId}` : '');
+    setActiveTab('issues');
+  }
+
+  const matrixQuery = searchQuery.trim().toLowerCase();
+  const hasMatrixFilters = gradeFilter !== 'all' || matrixQuery !== '' || matrixAttendanceFilter !== 'all' || matrixIssueFilter !== 'all';
+  const filteredClassrooms = data.classrooms.filter((room) =>
+    (gradeFilter === 'all' || String(room.grade) === gradeFilter) &&
+    (matrixAttendanceFilter === 'all' || room.statusReported === (matrixAttendanceFilter === 'yes')) &&
+    (matrixIssueFilter === 'all' || issueClassroomIds.has(room.classId) === (matrixIssueFilter === 'yes')) &&
+    (!matrixQuery || [room.classId, room.className, room.invigilator].some((value) => value.toLowerCase().includes(matrixQuery)))
+  );
+
+  function clearMatrixFilters() {
+    setGradeFilter('all');
+    setSearchQuery('');
+    setMatrixAttendanceFilter('all');
+    setMatrixIssueFilter('all');
+  }
+
+  function matrixSortValue(room: ClassroomExamState, field: MatrixSortField) {
+    if (field === 'issue') return Number(issueClassroomIds.has(room.classId));
+    if (field === 'statusReported') return Number(room.statusReported);
+    if ((field === 'presentCount' || field === 'absentCount') && !room.statusReported) return null;
+    return room[field];
+  }
+
+  const matrixTableRows = matrixDisplayMode === 'table' && matrixSort ? [...filteredClassrooms].sort((a, b) => {
+    const first = matrixSortValue(a, matrixSort.field);
+    const second = matrixSortValue(b, matrixSort.field);
+    const byClass = matrixCollator.compare(a.classId, b.classId);
+    if (first === null || second === null) return Number(first === null) - Number(second === null) || byClass;
+    const order = typeof first === 'number' && typeof second === 'number'
+      ? first - second : matrixCollator.compare(String(first), String(second));
+    return (matrixSort.ascending ? order : -order) || byClass;
+  }) : filteredClassrooms;
+
+  function matrixSortHeader(field: MatrixSortField, numeric = false) {
+    const current = matrixSort?.field === field ? matrixSort : undefined;
+    const Icon = current ? current.ascending ? ArrowUp : ArrowDown : ArrowDownUp;
+    return <th scope="col" aria-sort={current ? current.ascending ? 'ascending' : 'descending' : undefined}
+      className={numeric ? 'text-center' : 'text-left'}>
+      <button type="button" onClick={() => setMatrixSort((previous) => ({ field, ascending: previous?.field !== field || !previous.ascending }))}
+        className={`inline-flex min-h-11 w-full cursor-pointer items-center gap-1 whitespace-nowrap text-inherit hover:bg-violet-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-violet-700 ${numeric ? 'justify-center px-3' : 'px-4'}`}>
+        {matrixSortFields[field]}<Icon size={14} aria-hidden="true" className={current ? 'text-violet-800' : 'text-slate-500'} />
+      </button>
+    </th>;
+  }
 
   // Publish Announcement
   const handlePublishAnnouncement = async (e: React.FormEvent) => {
@@ -1218,16 +1246,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
   ] as const;
   const currentSection = sections.find((section) => section.id === activeTab) ?? sections[0];
   const CurrentIcon = currentSection.icon;
+  const hasSectionHeader = activeTab === 'broadcast' || activeTab === 'teachers' || activeTab === 'logs' || activeTab === 'settings' || activeTab === 'issues' || activeTab === 'assign' || activeTab === 'reports';
   const examDetails = [data.config.examName, data.config.subject, data.config.examDate].filter(Boolean);
   if (activeTab === 'home') {
     return (
-      <div className={`print-report-root flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-[#e7eef2] shadow-sm ${isEmbedded ? 'xl:h-[820px] xl:overflow-y-auto' : ''}`}>
+      <div className={`print-report-root flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 shadow-sm ${isEmbedded ? 'xl:h-[820px] xl:overflow-y-auto' : ''}`}>
         {confirmationDialog}
-        <section className="attendance-banner no-print relative isolate overflow-hidden px-5 py-7 text-white sm:px-10 sm:py-10">
-          <div className="attendance-banner-pattern pointer-events-none absolute inset-0 -z-10" aria-hidden="true" />
-          <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-teal-200"><Building2 size={16} aria-hidden="true" />教務管理中心</p>
+        <section className="view-header-banner no-print px-5 py-7 text-slate-950 sm:px-10 sm:py-10">
+          <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-(--header-accent)"><Building2 size={16} aria-hidden="true" />教務管理中心</p>
           <h1 className="mt-3 max-w-3xl text-3xl font-black tracking-tight sm:text-5xl">選擇要開啟的看板</h1>
-          {examDetails.length > 0 && <p className="mt-3 text-sm text-slate-200 sm:text-base">{examDetails.join(' · ')}</p>}
+          {examDetails.length > 0 && <p className="mt-3 text-sm text-slate-700 sm:text-base">{examDetails.join(' · ')}</p>}
         </section>
         <div className="flex-1 p-5 sm:p-10">
           <BoardPortals onNavigate={onNavigateView} />
@@ -1243,8 +1271,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       event.preventDefault();
                       setActiveTab(section.id);
                     }}
-                    className="flex min-h-12 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
-                    <Icon size={16} className="shrink-0 text-teal-800" aria-hidden="true" />
+                    className="flex min-h-12 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-violet-300 hover:bg-violet-50 focus-visible:outline-2 focus-visible:outline-violet-700">
+                    <Icon size={16} className="shrink-0 text-violet-800" aria-hidden="true" />
                     {section.label}
                   </a>
                 );
@@ -1286,33 +1314,32 @@ export const AdminView: React.FC<AdminViewProps> = ({
   return (
     <div className={`print-report-root ${activeTab === 'reports' ? 'official-report-layout' : ''} flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm ${isEmbedded ? 'xl:h-[820px] xl:overflow-y-auto' : ''}`}>
       {confirmationDialog}
-      <section className={`attendance-banner no-print relative isolate overflow-hidden px-4 text-white sm:px-7 ${activeTab === 'broadcast' || activeTab === 'teachers' ? 'py-4' : 'py-5 sm:py-7'}`}>
-        <div className="attendance-banner-pattern pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3" aria-hidden="true" />
+      <section className={`view-header-banner no-print px-4 text-slate-950 sm:px-7 ${hasSectionHeader ? 'py-4' : 'py-5 sm:py-7'}`}>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
-            <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-teal-200"><Building2 size={16} aria-hidden="true" />教務管理中心</p>
+            <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-(--header-accent)"><Building2 size={16} aria-hidden="true" />教務管理中心</p>
             <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-4xl">教務管理中心</h1>
-            {examDetails.length > 0 && <p className="mt-2 text-sm text-slate-200">{examDetails.join(' · ')}</p>}
+            {examDetails.length > 0 && <p className="mt-2 text-sm text-slate-700">{examDetails.join(' · ')}</p>}
           </div>
           <div className="grid w-full grid-cols-3 gap-2 text-center sm:w-auto">
-            <dl className="rounded-xl border border-white/20 bg-slate-950/25 px-2 py-2 sm:min-w-26">
-              <dt className="text-[11px] font-bold text-teal-100 sm:text-xs">正常考場</dt>
+            <dl className="rounded-xl border border-(--header-edge) bg-white/80 px-2 py-2 sm:min-w-26">
+              <dt className="text-[11px] font-bold text-emerald-800 sm:text-xs">正常考場</dt>
               <dd className="mt-1 font-mono text-lg font-bold sm:text-2xl">{normalCount}</dd>
             </dl>
             <button type="button" onClick={() => setActiveTab('issues')}
-              className={`min-w-0 cursor-pointer rounded-xl border px-2 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300 sm:min-w-26 ${abnormalCount > 0 ? 'border-rose-200/50 bg-rose-900/60 hover:bg-rose-900' : 'border-white/20 bg-slate-950/25 hover:bg-white/10'}`}>
-              <span className="block text-[11px] font-bold text-slate-100 sm:text-xs">需處理考場</span>
+              className={`min-w-0 cursor-pointer rounded-xl border px-2 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--header-accent) sm:min-w-26 ${abnormalCount > 0 ? 'border-rose-200 bg-rose-50 text-rose-900 hover:bg-rose-100' : 'border-(--header-edge) bg-white/80 hover:bg-white'}`}>
+              <span className="block text-[11px] font-bold sm:text-xs">需處理考場</span>
               <span className="mt-1 block font-mono text-lg font-bold sm:text-2xl">{abnormalCount}</span>
             </button>
-            <dl className="rounded-xl border border-white/20 bg-slate-950/25 px-2 py-2 sm:min-w-26">
-              <dt className="text-[11px] font-bold text-amber-100 sm:text-xs">全校缺席</dt>
+            <dl className="rounded-xl border border-(--header-edge) bg-white/80 px-2 py-2 sm:min-w-26">
+              <dt className="text-[11px] font-bold text-amber-800 sm:text-xs">全校缺席</dt>
               <dd className="mt-1 font-mono text-lg font-bold sm:text-2xl">{totalAbsent}</dd>
             </dl>
           </div>
         </div>
       </section>
 
-      <nav aria-label="教務功能" className={`no-print grid grid-cols-2 gap-2 border-b border-slate-200 bg-white p-3 sm:grid-cols-4 sm:px-6 ${activeTab === 'broadcast' || activeTab === 'teachers' ? 'xl:grid-cols-8' : 'xl:grid-cols-7'}`}>
+      <nav aria-label="教務功能" className={`no-print grid grid-cols-2 gap-2 border-b border-slate-200 bg-white p-3 sm:grid-cols-4 sm:px-6 ${hasSectionHeader && !isEmbedded ? 'xl:grid-cols-8' : 'xl:grid-cols-7'}`}>
         {sections.filter((section) => !isEmbedded || section.id !== 'reports').map((section) => {
           const Icon = section.icon;
           return (
@@ -1323,35 +1350,31 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 event.preventDefault();
                 setActiveTab(section.id);
               }}
-              className="group flex min-h-11 min-w-0 items-center gap-1.5 rounded-xl border border-slate-200 px-2 text-xs font-bold text-slate-700 hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700 aria-[current=page]:border-teal-700 aria-[current=page]:bg-teal-50 aria-[current=page]:text-teal-900 sm:px-3">
-              <Icon size={16} className="shrink-0 text-teal-800" aria-hidden="true" />
+              className="group flex min-h-11 min-w-0 items-center gap-1.5 rounded-xl border border-slate-200 px-2 text-xs font-bold text-slate-700 hover:border-violet-300 hover:bg-violet-50 focus-visible:outline-2 focus-visible:outline-violet-700 aria-[current=page]:border-violet-700 aria-[current=page]:bg-violet-50 aria-[current=page]:text-violet-900 sm:px-3">
+              <Icon size={16} className="shrink-0 text-violet-800" aria-hidden="true" />
               <span>{section.label}</span>
-              {'count' in section && <span className="ml-auto shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-700 group-aria-[current=page]:bg-teal-100">{section.count}</span>}
+              {'count' in section && <span className="ml-auto shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-700 group-aria-[current=page]:bg-violet-100">{section.count}</span>}
             </a>
           );
         })}
       </nav>
 
       <div className="min-w-0 flex-1 bg-slate-50 p-3 sm:p-6 lg:p-7 xl:overflow-y-auto">
-        <div hidden={activeTab === 'broadcast' || activeTab === 'teachers'} className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div hidden={hasSectionHeader} className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
-            <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-teal-200 bg-teal-50 text-teal-800"><CurrentIcon size={19} aria-hidden="true" /></span>
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-violet-200 bg-violet-50 text-violet-800"><CurrentIcon size={19} aria-hidden="true" /></span>
             <div>
               <h2 className="text-lg font-black text-slate-950 sm:text-xl">{currentSection.label}</h2>
               <p className="mt-0.5 text-sm leading-6 text-slate-600">{currentSection.description}</p>
             </div>
           </div>
-          {activeTab === 'reports' && <button type="button" onClick={exportAttendanceCSV}
-            className="flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700">
-            <Download size={16} className="text-teal-800" aria-hidden="true" />匯出全校彙總＋目前篩選明細 CSV
-          </button>}
         </div>
 
         {activeTab === 'settings' && (configConflict || configDirty.current) && <div role="status" className="mb-3 rounded-xl bg-amber-50 p-3 text-sm font-bold">
           {configConflict ? '基本資料已由其他人更新。你的草稿未被覆蓋；請重新載入最新資料後核對。' : '基本資料有尚未儲存的變更。'}
           <button type="button" onClick={() => { if (window.confirm('捨棄基本資料草稿並載入最新資料？')) { configDirty.current = false; setConfigConflict(false); setConfigSaved(false); setConfigForm(sourceData.config); } }} className="ml-3 underline">捨棄草稿並重新載入</button>
         </div>}
-        {isAttendanceTab && (
+        {activeTab === 'matrix' && (
           <div className="no-print mb-4 rounded-2xl border border-slate-200 bg-white p-4">
             <ExamPeriodSelect periods={periods} value={chosenPeriod?.id ?? ''} onChange={setRequestedPeriodId} autoLabel="自動選擇考試節次" />
             <p className="mt-2 text-sm font-bold text-slate-700">
@@ -1360,48 +1383,55 @@ export const AdminView: React.FC<AdminViewProps> = ({
           </div>
         )}
 
-        {/* TAB 1: 全校考場出席人數即時看板 (預設 4x3 零滾動矩陣 + 支援全螢幕免滾動電視牆) */}
+        {/* TAB 1: 全校考場出席人數即時看板 */}
         {activeTab === 'matrix' && (
           <div className="space-y-3.5">
-            {/* 全螢幕「全校考場出席人數即時看板」淺色電視牆模式 (桌機零滾動 / 手機平板流暢自適應) */}
-            {/* 篩選、檢視切換與「全螢幕出席看板」按鈕 */}
-            <div className={isAttendanceWallFullscreen ? 'fixed inset-0 z-50 overflow-y-auto bg-slate-50 p-4 space-y-4' : 'space-y-4'}>
-            {isAttendanceWallFullscreen && <div className="rounded-xl bg-white p-3 font-bold">
-              <p>{selectedPeriod ? periodLabel(selectedPeriod) : '尚無考試節次'} · {gradeFilter === 'all' ? '全年級' : gradeName(Number(gradeFilter))} · {filteredClassrooms.length} 班</p>
-              {fullscreenNote && <p role="status">{fullscreenNote}</p>}
-              <button type="button" onClick={() => setWallPage(Math.max(0, wallPage - 1))} disabled={wallPage === 0} className="p-3 disabled:opacity-40">上一頁</button>
-              <span>第 {Math.min(wallPage + 1, Math.max(1, Math.ceil(filteredClassrooms.length / 8)))} / {Math.max(1, Math.ceil(filteredClassrooms.length / 8))} 頁</span>
-              <button type="button" onClick={() => setWallPage(wallPage + 1)} disabled={(wallPage + 1) * 8 >= filteredClassrooms.length} className="p-3 disabled:opacity-40">下一頁</button>
-              <button type="button" onClick={toggleAttendanceWallFullscreen} className="p-3 underline">退出放大／全螢幕</button>
-            </div>}
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-slate-600 shrink-0">年級:</span>
-                <select aria-label="篩選年級" value={gradeFilter} onChange={(event) => setGradeFilter(event.target.value)}
-                  className="min-h-10 max-w-full rounded-xl border border-slate-300 bg-white px-2 text-sm font-bold">
-                  <option value="all">全部年級</option>
-                  {grades.map((grade) => <option key={grade} value={grade}>{gradeName(grade)}</option>)}
-                </select>
+            <section aria-label="考場篩選" className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-[minmax(0,1.5fr)_repeat(3,minmax(0,1fr))]">
+                <label className="col-span-2 min-w-0 space-y-1 text-xs font-bold text-slate-700 lg:col-span-1">
+                  <span>搜尋考場</span>
+                  <span className="relative block">
+                    <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input type="search" placeholder="班級代號、班名或監考教師" value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)} className={`${matrixFilterField} pl-9`} />
+                  </span>
+                </label>
+                <label className="min-w-0 space-y-1 text-xs font-bold text-slate-700">
+                  <span>年級</span>
+                  <select value={gradeFilter} onChange={(event) => setGradeFilter(event.target.value)} className={matrixFilterField}>
+                    <option value="all">全部年級</option>
+                    {grades.map((grade) => <option key={grade} value={grade}>{gradeName(grade)}</option>)}
+                  </select>
+                </label>
+                <label className="min-w-0 space-y-1 text-xs font-bold text-slate-700">
+                  <span>點名狀態</span>
+                  <select value={matrixAttendanceFilter} onChange={(event) => setMatrixAttendanceFilter(event.target.value as MatrixFilter)} className={matrixFilterField}>
+                    <option value="all">全部點名狀態</option>
+                    <option value="yes">已回報</option>
+                    <option value="no">待點名</option>
+                  </select>
+                </label>
+                <label className="min-w-0 space-y-1 text-xs font-bold text-slate-700">
+                  <span>考場通報</span>
+                  <select value={matrixIssueFilter} onChange={(event) => setMatrixIssueFilter(event.target.value as MatrixFilter)} className={matrixFilterField}>
+                    <option value="all">全部考場</option>
+                    <option value="yes">有未結案通報</option>
+                    <option value="no">無未結案通報</option>
+                  </select>
+                </label>
               </div>
-
-              <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
-                <div className="relative min-w-0 w-full sm:w-52">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
-                  <input
-                    type="text"
-                    aria-label="搜尋班級或監考老師"
-                    placeholder="搜尋班級或監考老師..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="text-xs pl-8 pr-3 py-1.5 rounded-xl border border-slate-300 bg-white text-slate-900 w-full focus:outline-none focus:ring-2 focus:ring-teal-700 font-bold"
-                  />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <p role="status" className="text-sm font-bold text-slate-700">顯示 {filteredClassrooms.length} / {totalClassrooms} 班</p>
+                  {hasMatrixFilters && <button type="button" onClick={clearMatrixFilters}
+                    className="min-h-11 cursor-pointer rounded-xl px-2 text-sm font-bold text-violet-800 hover:bg-violet-50">清除篩選</button>}
                 </div>
-
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                <div role="group" aria-label="清單顯示方式" className="flex items-center gap-1 rounded-xl bg-slate-100 p-1">
                   <button
                     type="button"
                     onClick={() => setMatrixDisplayMode('grid')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer ${
+                    aria-pressed={matrixDisplayMode === 'grid'}
+                    className={`min-h-10 px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer ${
                       matrixDisplayMode === 'grid'
                         ? 'bg-white text-slate-900 shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
@@ -1413,7 +1443,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setMatrixDisplayMode('table')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer ${
+                    aria-pressed={matrixDisplayMode === 'table'}
+                    className={`min-h-10 px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer ${
                       matrixDisplayMode === 'table'
                         ? 'bg-white text-slate-900 shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
@@ -1423,32 +1454,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     <span>表格</span>
                   </button>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={toggleAttendanceWallFullscreen}
-                  className="px-3.5 py-1.5 rounded-xl bg-teal-800 hover:bg-teal-900 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap shadow-2xs transition-colors"
-                >
-                  <Maximize2 className="w-3.5 h-3.5" />
-                  <span>{isAttendanceWallFullscreen ? '退出全螢幕' : '放大目前清單'}</span>
-                </button>
               </div>
-            </div>
+            </section>
 
-            {/* 預設模式：4x3 緊湊考場出席人數即時看板 (單頁顯示全校考場，無須上下捲動) */}
             {filteredClassrooms.length === 0 ? (
               <div className="flex min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-center">
-                <Users size={26} className="text-teal-800" aria-hidden="true" />
+                <Users size={26} className="text-violet-800" aria-hidden="true" />
                 <p className="mt-2 font-bold text-slate-950">{totalClassrooms === 0 ? '目前尚未建立考場。' : '沒有符合條件的考場。'}</p>
                 {totalClassrooms === 0 ? (
-                  <button type="button" onClick={() => setActiveTab('settings')} className="mt-3 min-h-10 cursor-pointer rounded-xl bg-teal-800 px-3 text-sm font-bold text-white hover:bg-teal-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700">前往考務設定</button>
-                ) : (
-                  <button type="button" onClick={() => { setGradeFilter('all'); setSearchQuery(''); }} className="mt-3 min-h-10 cursor-pointer rounded-xl border border-slate-200 px-3 text-sm font-bold text-teal-800 hover:bg-teal-50">清除篩選</button>
-                )}
+                  <button type="button" onClick={() => setActiveTab('settings')} className="mt-3 min-h-10 cursor-pointer rounded-xl bg-violet-800 px-3 text-sm font-bold text-white hover:bg-violet-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700">前往考務設定</button>
+                ) : null}
               </div>
             ) : matrixDisplayMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {(isAttendanceWallFullscreen ? filteredClassrooms.slice(Math.min(wallPage, Math.max(0, Math.ceil(filteredClassrooms.length / 8) - 1)) * 8, (Math.min(wallPage, Math.max(0, Math.ceil(filteredClassrooms.length / 8) - 1)) + 1) * 8) : filteredClassrooms).map((c) => {
+                {filteredClassrooms.map((c) => {
                   const classIssues = data.issues.filter((i) => i.classId === c.classId);
                   const hasUnresolved = classIssues.some((i) => i.status !== 'resolved');
                   const latestIssue = classIssues.filter((i) => i.status !== 'resolved').sort((a, b) => Number(b.isUrgent) - Number(a.isUrgent))[0];
@@ -1459,7 +1478,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
                         hasUnresolved
                           ? 'bg-rose-50/80 border-rose-300'
-                          : 'bg-white border-slate-200 hover:border-teal-300'
+                          : 'bg-white border-slate-200 hover:border-violet-300'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -1478,11 +1497,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         {hasUnresolved ? (
                           <button
                             type="button"
-                            onClick={() => {
-                              if (latestIssue) setSelectedIssueId(latestIssue.id);
-                              setIssueClassFilter(c.classId);
-                              setActiveTab('issues');
-                            }}
+                            onClick={() => openIssueForClass(c.classId, latestIssue)}
                             className="px-2.5 py-1 rounded-lg bg-rose-700 text-white font-black text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap"
                           >
                             <AlertTriangle className="w-3 h-3" />
@@ -1543,7 +1558,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           onClick={() => {
                             if (onSelectClassroom) onSelectClassroom(c.classId, selectedPeriod?.id);
                           }}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-800 font-black text-xs cursor-pointer transition-colors"
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-violet-50 text-slate-700 hover:text-violet-800 font-black text-xs cursor-pointer transition-colors"
                         >
                           巡查此班
                         </button>
@@ -1555,24 +1570,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
             ) : (
               /* 表格模式 */
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
-                <p className="px-4 py-2 text-xs text-slate-600 sm:hidden">表格可左右滑動；也可切換上方「宮格」。</p>
+                <p className="px-4 py-2 text-xs text-slate-600">點擊有箭頭的表頭可排序。<span className="sm:hidden"> 表格可左右滑動。</span></p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs sm:text-sm border-collapse">
                     <thead>
                       <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-black">
-                        <th className="py-2.5 px-4">考場班級</th>
-                        <th className="py-2.5 px-4">監考教師</th>
-                        <th className="py-2.5 px-4">點名狀態</th>
-                        <th className="py-2.5 px-3 text-center font-mono">應到</th>
-                        <th className="py-2.5 px-3 text-center font-mono">實到</th>
-                        <th className="py-2.5 px-3 text-center font-mono">缺席</th>
-                        <th className="py-2.5 px-4">缺席考生明細</th>
-                        <th className="py-2.5 px-4">考場即時狀況</th>
-                        <th className="py-2.5 px-4 text-right">操作</th>
+                        {matrixSortHeader('classId')}
+                        {matrixSortHeader('invigilator')}
+                        {matrixSortHeader('statusReported')}
+                        {matrixSortHeader('expectedCount', true)}
+                        {matrixSortHeader('presentCount', true)}
+                        {matrixSortHeader('absentCount', true)}
+                        <th scope="col" className="whitespace-nowrap py-2.5 px-4">缺席考生明細</th>
+                        {matrixSortHeader('issue')}
+                        <th scope="col" className="whitespace-nowrap py-2.5 px-4 text-right">操作</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-bold">
-                      {(isAttendanceWallFullscreen ? filteredClassrooms.slice(Math.min(wallPage, Math.max(0, Math.ceil(filteredClassrooms.length / 8) - 1)) * 8, (Math.min(wallPage, Math.max(0, Math.ceil(filteredClassrooms.length / 8) - 1)) + 1) * 8) : filteredClassrooms).map((c) => {
+                      {matrixTableRows.map((c) => {
                         const classIssues = data.issues.filter((i) => i.classId === c.classId);
                         const hasUnresolved = classIssues.some((i) => i.status !== 'resolved');
                         const latestIssue = classIssues.filter((i) => i.status !== 'resolved').sort((a, b) => Number(b.isUrgent) - Number(a.isUrgent))[0];
@@ -1580,7 +1595,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         return (
                           <tr
                             key={c.classId}
-                            className={`hover:bg-teal-50/40 transition-colors ${
+                            className={`hover:bg-violet-50/40 transition-colors ${
                               hasUnresolved ? 'bg-rose-50/70' : ''
                             }`}
                           >
@@ -1617,11 +1632,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                               {hasUnresolved ? (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    if (latestIssue) setSelectedIssueId(latestIssue.id);
-                              setIssueClassFilter(c.classId);
-                                    setActiveTab('issues');
-                                  }}
+                                  onClick={() => openIssueForClass(c.classId, latestIssue)}
                                   className="px-2.5 py-1 rounded-xl bg-rose-700 hover:bg-rose-700 text-white font-black text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap"
                                 >
                                   <AlertTriangle className="w-3.5 h-3.5" />
@@ -1639,7 +1650,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                 onClick={() => {
                                   if (onSelectClassroom) onSelectClassroom(c.classId, selectedPeriod?.id);
                                 }}
-                                className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-teal-100 text-slate-700 hover:text-teal-950 font-black text-xs cursor-pointer transition-colors"
+                                className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-violet-100 text-slate-700 hover:text-violet-950 font-black text-xs cursor-pointer transition-colors"
                               >
                                 巡查此班
                               </button>
@@ -1653,7 +1664,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </div>
             )}
 
-            </div>
             {/* 內嵌式「快速改題目廣播」卡片 */}
             {isEmbedded && (
               <form
@@ -1706,7 +1716,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <button
                   type="submit"
                   disabled={isPublishing || !annoTitle.trim() || !annoContent.trim()}
-                  className="w-full min-h-[44px] py-2.5 bg-teal-800 hover:bg-teal-900 disabled:opacity-50 text-white font-black text-xs sm:text-sm rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full min-h-[44px] py-2.5 bg-violet-800 hover:bg-violet-900 disabled:opacity-50 text-white font-black text-xs sm:text-sm rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>{isPublishing ? '正在儲存公告…' : '預覽並發布公告'}</span>
@@ -1720,16 +1730,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
         {/* TAB 2: 試題更正 / 公告發布 */}
         {activeTab === 'broadcast' && (
           <div className="space-y-4 sm:space-y-5">
-            <header className="rounded-2xl border border-teal-200 bg-linear-to-br from-white via-teal-50 to-sky-50 p-4 sm:p-6">
-              <p className="flex items-center gap-2 text-sm font-bold text-teal-800"><Radio size={17} aria-hidden="true" />考務發布</p>
+            <header className="view-header-banner rounded-2xl border border-(--header-edge) p-4 sm:p-6">
+              <p className="flex items-center gap-2 text-sm font-bold text-violet-800"><Radio size={17} aria-hidden="true" />考務發布</p>
               <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">公告與更正</h2>
               <p className="mt-1 text-sm leading-6 text-slate-700">集中審核教師送來的更正、發布新公告，並查看各則公告的顯示時段。</p>
               <nav aria-label="公告與更正功能" className="mt-4 grid gap-2 sm:grid-cols-3">
                 {broadcastPanels.map(({ id, label, icon: Icon }) => (
                   <button key={id} type="button" aria-pressed={broadcastPanel === id} aria-controls={'broadcast-' + id}
                     onClick={() => setBroadcastPanel(id)}
-                    className="flex min-h-14 min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm font-bold text-slate-800 hover:border-teal-400 hover:bg-teal-50 aria-pressed:border-teal-700 aria-pressed:bg-teal-100 aria-pressed:text-teal-950">
-                    <Icon size={19} className="shrink-0 text-teal-800" aria-hidden="true" />
+                    className="flex min-h-14 min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm font-bold text-slate-800 hover:border-violet-400 hover:bg-violet-50 aria-pressed:border-violet-700 aria-pressed:bg-violet-100 aria-pressed:text-violet-950">
+                    <Icon size={19} className="shrink-0 text-violet-800" aria-hidden="true" />
                     <span>{label}</span>
                     {id === 'review' && pendingCorrections > 0 && <span className="ml-auto shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-950">{pendingCorrections} 筆待審</span>}
                     {id === 'history' && <span className="ml-auto shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">{data.announcements.length} 則</span>}
@@ -1746,11 +1756,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
                 <section aria-labelledby="broadcast-compose-title" className={broadcastCard}>
                   <h3 id="broadcast-compose-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
-                    <FileEdit size={20} className="shrink-0 text-teal-800" aria-hidden="true" />撰寫新公告
+                    <FileEdit size={20} className="shrink-0 text-violet-800" aria-hidden="true" />撰寫新公告
                   </h3>
                   <form onSubmit={handlePublishAnnouncement} className="mt-4 space-y-5">
                     <fieldset className="min-w-0">
-                      <legend className="mb-2 text-sm font-black text-teal-900">1　設定發布對象與類型</legend>
+                      <legend className="mb-2 text-sm font-black text-violet-900">1　設定發布對象與類型</legend>
                       <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                         <label className="min-w-0 text-sm font-bold text-slate-800">發布對象
                           <select id="admin-target-audience" value={targetAudience} onChange={(event) => setTargetAudience(event.target.value)} className={broadcastField}>
@@ -1782,7 +1792,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       </div>
                     </fieldset>
                     <fieldset className="min-w-0 space-y-3 border-t border-slate-200 pt-3">
-                      <legend className="pr-2 text-sm font-black text-teal-900">2　填寫公告內容</legend>
+                      <legend className="pr-2 text-sm font-black text-violet-900">2　填寫公告內容</legend>
                       <label className="block text-sm font-bold text-slate-800">公告標題
                         <input id="admin-anno-title" ref={announcementTitleRef} required maxLength={150} value={annoTitle}
                           onChange={(event) => setAnnoTitle(event.target.value)} placeholder="例如 第 5 題選項更正" className={broadcastField} />
@@ -1794,7 +1804,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     </fieldset>
                     {announcementScheduleFields(true)}
                     <button type="submit" disabled={isPublishing || !annoTitle.trim() || !annoContent.trim()}
-                      className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-teal-800 px-4 py-2 text-sm font-black text-white hover:bg-teal-900 disabled:opacity-50">
+                      className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-violet-800 px-4 py-2 text-sm font-black text-white hover:bg-violet-900 disabled:opacity-50">
                       <Send size={18} aria-hidden="true" />{isPublishing ? '正在發布公告…' : '預覽並發布公告'}
                     </button>
                     {announcementFeedback}
@@ -1803,12 +1813,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
                 <aside aria-labelledby="broadcast-summary-title" className={broadcastCard}>
                   <h3 id="broadcast-summary-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
-                    <CalendarClock size={20} className="shrink-0 text-teal-800" aria-hidden="true" />發布摘要
+                    <CalendarClock size={20} className="shrink-0 text-violet-800" aria-hidden="true" />發布摘要
                   </h3>
                   <dl className="mt-3 space-y-3 text-sm text-slate-700">
-                    <div className="rounded-xl border border-teal-100 bg-teal-50 p-3">
-                      <dt className="text-xs font-bold text-teal-800">發布對象</dt>
-                      <dd className="mt-1 font-black text-teal-950 [overflow-wrap:anywhere]">{getTargetAudienceLabel(targetAudience)} · {announcementRooms(targetAudience).length} 班</dd>
+                    <div className="rounded-xl border border-violet-100 bg-violet-50 p-3">
+                      <dt className="text-xs font-bold text-violet-800">發布對象</dt>
+                      <dd className="mt-1 font-black text-violet-950 [overflow-wrap:anywhere]">{getTargetAudienceLabel(targetAudience)} · {announcementRooms(targetAudience).length} 班</dd>
                     </div>
                     <div>
                       <dt className="text-xs font-bold">公告類型</dt>
@@ -1828,7 +1838,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <section id="broadcast-history" hidden={broadcastPanel !== 'history'} aria-labelledby="broadcast-history-title" className={broadcastCard}>
               <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-4">
                 <div>
-                  <h3 id="broadcast-history-title" className="flex items-center gap-2 text-lg font-black text-slate-950"><History size={20} className="text-teal-800" aria-hidden="true" />公告紀錄</h3>
+                  <h3 id="broadcast-history-title" className="flex items-center gap-2 text-lg font-black text-slate-950"><History size={20} className="text-violet-800" aria-hidden="true" />公告紀錄</h3>
                   <p className="mt-1 text-sm text-slate-600">查看顯示狀態，或複製舊公告來撰寫新版。</p>
                 </div>
                 <label className="min-w-0 text-sm font-bold text-slate-800">顯示狀態
@@ -1839,7 +1849,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </label>
               </div>
               {withdrawFeedback && <p role={withdrawFeedback.error ? 'alert' : 'status'}
-                className={'mt-4 rounded-xl p-3 text-sm font-bold ' + (withdrawFeedback.error ? 'bg-rose-50 text-rose-900' : 'bg-teal-50 text-teal-900')}>{withdrawFeedback.text}</p>}
+                className={'mt-4 rounded-xl p-3 text-sm font-bold ' + (withdrawFeedback.error ? 'bg-rose-50 text-rose-900' : 'bg-emerald-50 text-emerald-900')}>{withdrawFeedback.text}</p>}
               {filteredAnnouncements.length ? (
                 <ul className="mt-4 grid min-w-0 gap-3 xl:grid-cols-2">
                   {filteredAnnouncements.map((anno) => {
@@ -1862,7 +1872,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         </dl>
                         <div className="mt-auto flex flex-wrap gap-2 border-t border-slate-200 pt-2">
                           <button type="button" onClick={() => copyAnnouncement(anno)} disabled={isPublishing}
-                            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-3 text-sm font-bold text-teal-900 hover:bg-teal-50 disabled:opacity-50">
+                            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 text-sm font-bold text-violet-900 hover:bg-violet-50 disabled:opacity-50">
                             <Copy size={15} aria-hidden="true" />複製為新公告
                           </button>
                           <button type="button" onClick={() => void handleDeleteAnnouncement(anno.id)} disabled={Boolean(withdrawingId)}
@@ -1881,240 +1891,66 @@ export const AdminView: React.FC<AdminViewProps> = ({
           </div>
         )}
 
-        {/* TAB 3: 考場突發回報受理 */}
         {activeTab === 'issues' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-7">
-            {/* 左邊：案件列表 */}
-            <div className="lg:col-span-6 bg-white rounded-2xl sm:rounded-3xl border-2 border-slate-200 p-4 sm:p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <h3 className="text-sm sm:text-base font-black text-slate-900">
-                  各考場通報清單 ({filteredIssues.length}) · 待處理 {filteredIssues.filter((issue) => issue.status !== 'resolved').length} 件
-                </h3>
-                <span className="text-xs text-slate-600 font-bold">先聯絡支援人員，再選案件回覆</span>
-              </div>
-
-              <label className="block min-w-0 text-sm font-bold text-slate-800">通報節次
-                <select value={issuePeriodFilter} onChange={(event) => setIssuePeriodFilter(event.target.value)}
-                  className="mt-1 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-2">
-                  <option value="">所有節次</option>
-                  {[...issuePeriods].map(([id, label]) => <option key={id} value={`period:${id}`}>{label}</option>)}
-                  <option value="unassigned">未分節的舊通報</option>
-                </select>
-              </label>
-              <div className="space-y-3 overflow-y-auto max-h-[500px] pr-1">
-                {issueClassFilter && <button type="button" onClick={() => setIssueClassFilter('')} className="underline">目前：{issueClassFilter}，清除考場篩選</button>}
-                {!filteredIssues.length && <p className="p-4 text-slate-600">目前沒有考場通報。</p>}
-                {filteredIssues.map((issue) => (
-                  <button
-                    type="button"
-                    key={issue.id}
-                    aria-pressed={selectedIssueId === issue.id}
-                    onClick={() => setSelectedIssueId(issue.id)}
-                    className={`block w-full p-4 text-left rounded-2xl border-2 transition-all cursor-pointer space-y-2 ${
-                      selectedIssueId === issue.id
-                        ? 'border-teal-700 bg-teal-50/70 shadow-sm'
-                        : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="flex items-center justify-between">
-                      <span className="flex items-center gap-2">
-                        <span className="text-base font-black text-slate-900">
-                          {issue.className}
-                        </span>
-                        {issue.isUrgent && (
-                          <span className="text-rose-700 font-black text-xs">
-                            · 緊急優先
-                          </span>
-                        )}
-                      </span>
-                      <span
-                        className={`text-xs font-black ${
-                          issue.status === 'resolved'
-                            ? 'text-emerald-700'
-                            : issue.status === 'processing'
-                            ? 'text-amber-700'
-                            : 'text-rose-700'
-                        }`}
-                      >
-                        {issue.status === 'resolved' ? '✓ 已解決' : issue.status === 'processing' ? '處理中' : '待派人'}
-                      </span>
-                    </span>
-
-                    <span className="block text-xs font-bold text-teal-800 [overflow-wrap:anywhere]">
-                      {issue.periodId ? issue.periodLabel ?? issuePeriods.get(issue.periodId) : '未分節的舊通報'}
-                    </span>
-                    <span className="block text-xs sm:text-sm text-slate-800 font-bold leading-relaxed">
-                      {issue.content}
-                    </span>
-
-                    <span className="text-[11px] text-slate-600 font-bold flex items-center justify-between">
-                      <span className="font-mono tabular-nums">{formatTaipeiClock(issue.createdAt)} 通報</span>
-                      {issue.reply && <span className="text-teal-800 font-black">已回覆派遣</span>}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 右邊：一鍵派遣大按鈕面板 */}
-            <div className="lg:col-span-6 bg-white rounded-2xl sm:rounded-3xl border border-teal-200 p-4 sm:p-6 shadow-sm flex flex-col justify-between space-y-5">
-              {isReplying && <p role="status" className="text-sm font-bold text-teal-900">正在儲存通報處理結果…</p>}
-              {replyFeedback && replyFeedback.issueId === selectedIssue?.id && <p role={replyFeedback.error ? 'alert' : 'status'}
-                className={`rounded-xl p-3 text-sm font-bold ${replyFeedback.error ? 'bg-rose-50 text-rose-900' : 'bg-teal-50 text-teal-900'}`}>{replyFeedback.text}</p>}
-              {selectedIssue ? (
-                (() => {
-                  const issue = selectedIssue;
-
-                  return (
-                    <div className="space-y-4 sm:space-y-5">
-                      <div className="border-b border-slate-100 pb-3">
-                        <span className="text-xs font-black text-teal-800 block mb-0.5">正在處置案件：</span>
-                        <h3 className="text-lg sm:text-xl font-black text-slate-900">
-                          {issue.className} 考場突發狀況
-                        </h3>
-                        <p className="mt-1 text-sm font-bold text-slate-700">
-                          {issue.periodId ? issue.periodLabel ?? issuePeriods.get(issue.periodId) : '未分節的舊通報'}
-                        </p>
-                      </div>
-
-                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                        <span className="text-xs font-bold text-slate-600 block mb-1">監考老師回報文字：</span>
-                        <p className="text-sm sm:text-base font-black text-slate-900 leading-relaxed">
-                          {issue.content}
-                        </p>
-                      </div>
-
-                      {/* 一鍵派遣 4 大按鈕 */}
-                      <div className="space-y-2">
-                        <span className="text-xs font-black text-slate-800 block">
-                          請先依校內方式聯絡支援人員；以下只回覆監考老師，不會通知健康中心、巡堂或總務。
-                        </span>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <button
-                            type="button"
-                            disabled={isReplying}
-                            onClick={() =>
-                              handleQuickDispatch(
-                                issue.id,
-                                '教務處已聯絡健康中心請求協助；到場時間待確認。',
-                                'processing'
-                              )
-                            }
-                            className="min-h-[48px] p-3.5 rounded-2xl bg-rose-50 hover:bg-rose-100 border-2 border-rose-300 text-rose-950 font-black text-xs sm:text-sm text-left transition-all cursor-pointer flex items-center gap-2"
-                          >
-                            <HeartPulse className="w-5 h-5 text-rose-700 shrink-0" />
-                            <span>我已聯絡健康中心，回覆老師</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={isReplying}
-                            onClick={() =>
-                              handleQuickDispatch(
-                                issue.id,
-                                '教務處已聯絡巡堂組協助補送試卷；到場時間待確認。',
-                                'processing'
-                              )
-                            }
-                            className="min-h-[48px] p-3.5 rounded-2xl bg-teal-50 hover:bg-teal-100 border-2 border-teal-300 text-teal-950 font-black text-xs sm:text-sm text-left transition-all cursor-pointer flex items-center gap-2"
-                          >
-                            <FileText className="w-5 h-5 text-teal-700 shrink-0" />
-                            <span>我已聯絡巡堂補卷，回覆老師</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={isReplying}
-                            onClick={() =>
-                              handleQuickDispatch(
-                                issue.id,
-                                '教務處已聯絡總務處請求維修；到場時間待確認。',
-                                'processing'
-                              )
-                            }
-                            className="min-h-[48px] p-3.5 rounded-2xl bg-amber-50 hover:bg-amber-100 border-2 border-amber-300 text-amber-950 font-black text-xs sm:text-sm text-left transition-all cursor-pointer flex items-center gap-2"
-                          >
-                            <Wrench className="w-5 h-5 text-amber-600 shrink-0" />
-                            <span>我已聯絡總務，回覆老師</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={isReplying}
-                            onClick={() =>
-                              handleQuickDispatch(
-                                issue.id,
-                                '教務處已確認處置完畢，紀錄於段考考務日誌。',
-                                'resolved'
-                              )
-                            }
-                            className="min-h-[48px] p-3.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-300 text-emerald-950 font-black text-xs sm:text-sm text-left transition-all cursor-pointer flex items-center gap-2"
-                          >
-                            <Check className="w-5 h-5 text-emerald-600 shrink-0" />
-                            <span>處置完成（結案）</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {issue.reply && (
-                        <div className="p-3.5 rounded-2xl bg-teal-50 border border-teal-200 text-xs sm:text-sm font-bold text-teal-950">
-                          <span>目前已傳送給老師的回覆：</span>
-                          <div className="mt-1 font-black text-teal-950">{issue.reply}</div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()
-              ) : (
-                <div className="text-center py-12 text-slate-600 font-bold">
-                  請先在通報清單選擇案件；沒有案件時無須操作。
-                </div>
-              )}
-            </div>
-          </div>
+          <AdminIssueDesk issues={filteredIssues} periods={issuePeriods} periodFilter={issuePeriodFilter}
+            classFilter={issueClassFilter} selected={selectedIssue} replying={isReplying} feedback={replyFeedback}
+            onPeriodChange={setIssuePeriodFilter} onClearClass={() => setIssueClassFilter('')}
+            onSelect={setSelectedIssueId} onReply={handleQuickDispatch} issueLabel={getIssueCategoryLabel} />
         )}
 
         {activeTab === 'reports' && (
           <div className="official-report-view space-y-5">
-            <div className="no-print rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-black text-slate-950">A4 正式報表預覽</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">篩選只影響考場明細與缺席清冊。總表、公告及通報採全校資料。</p>
+            <section aria-labelledby="report-preview-title" className="no-print overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <header className="view-header-banner flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-(--header-edge) bg-white text-(--header-accent)"><FileText size={22} aria-hidden="true" /></span>
+                  <div className="min-w-0">
+                    <h2 id="report-preview-title" className="text-xl font-black tracking-tight text-slate-950 sm:text-2xl">A4 正式報表預覽</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-700">選擇考試節次，核對下方報表後即可列印。</p>
+                  </div>
                 </div>
                 <button type="button" onClick={() => window.print()}
-                  className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-[#10243d] px-4 text-sm font-bold text-white hover:bg-[#1b3b51] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+                  className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-violet-800 px-4 text-sm font-bold text-white hover:bg-violet-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
                 >
                   <Printer size={17} aria-hidden="true" />列印正式報表 (A4)
                 </button>
-              </div>
+              </header>
 
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+              <div className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] sm:px-5">
+                <div className="min-w-0">
+                  <ExamPeriodSelect periods={periods} value={chosenPeriod?.id ?? ''} onChange={setRequestedPeriodId} autoLabel="自動選擇考試節次" />
+                  <p className="mt-1.5 text-xs font-bold text-violet-900 [overflow-wrap:anywhere]">
+                    {selectedPeriod ? `目前查看 · ${periodLabel(selectedPeriod)}` : '目前沒有已設定的考試節次。'}
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  <label className="block text-sm font-bold text-slate-700">
                     明細年級
                     <select aria-label="明細年級" value={reportGradeFilter} onChange={(event) => setReportGradeFilter(event.target.value)}
-                      className="min-h-10 rounded-xl border border-slate-300 bg-white px-2 focus-visible:outline-2 focus-visible:outline-teal-700">
+                      className="mt-1 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-2 focus-visible:outline-2 focus-visible:outline-violet-700">
                       <option value="all">全部年級</option>
                       {grades.map((grade) => <option key={grade} value={grade}>{gradeName(grade)}</option>)}
                     </select>
                   </label>
-                  <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 text-sm font-bold text-slate-700">
-                    <input type="checkbox" checked={reportOnlyAbsent} onChange={(event) => setReportOnlyAbsent(event.target.checked)} className="size-4 accent-teal-800" />
+                  <label className="mt-1 inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm font-bold text-slate-700">
+                    <input type="checkbox" checked={reportOnlyAbsent} onChange={(event) => setReportOnlyAbsent(event.target.checked)} className="size-4 accent-violet-800" />
                     僅列有缺席考場
                   </label>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={exportAttendanceCSV} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-teal-900 hover:bg-teal-50">
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-5">
+                <p className="max-w-md text-xs leading-5 text-slate-700">年級與缺席篩選只影響考場明細及缺席清冊。總表、公告與通報採全校資料。</p>
+                <div role="group" aria-label="匯出 CSV" className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={exportAttendanceCSV} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-violet-900 hover:bg-violet-50">
                     <Download size={16} aria-hidden="true" />全校彙總＋目前篩選明細 CSV
                   </button>
-                  <button type="button" onClick={exportAbsentRosterCSV} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-teal-900 hover:bg-teal-50">
+                  <button type="button" onClick={exportAbsentRosterCSV} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-violet-900 hover:bg-violet-50">
                     <FileText size={16} aria-hidden="true" />目前篩選缺席清冊 CSV
                   </button>
                 </div>
               </div>
-            </div>
+            </section>
 
             <OfficialExamReport
               data={data}
@@ -2129,74 +1965,68 @@ export const AdminView: React.FC<AdminViewProps> = ({
         {activeTab === 'logs' && <AuditLogView />}
 
         {activeTab === 'settings' && (
-          <div className="min-w-0 space-y-4">
+          <div className={activeSettingsPage ? 'grid min-w-0 items-start gap-4 lg:grid-cols-[12rem_minmax(0,1fr)] xl:grid-cols-[14rem_minmax(0,1fr)]' : 'min-w-0 space-y-4'}>
             <AdminSettingsNavigation active={activeSettingsPage} onNavigate={onSettingsPageChange} />
             {activeSettingsPage === 'schedule' && <ExamScheduleSettings data={sourceData} />}
             {activeSettingsPage === 'grades' && <GradeSettings data={sourceData} />}
             {activeSettingsPage === 'basics' && (
-              <div className="max-w-4xl space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-                <div className="border-b border-slate-100 pb-3">
-                  <h3 className="text-base sm:text-lg font-black text-slate-900">
+              <section aria-labelledby="exam-basics-title" className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <header className="view-header-banner px-4 py-4 sm:px-6">
+                  <h3 id="exam-basics-title" className="text-lg font-black text-slate-950 sm:text-xl">
                     考試基本資料
                   </h3>
-                  <p className="text-xs text-slate-600 font-bold mt-0.5">
-                    修改後將即時同步至全校各班「電子黑板」與「頁首資訊列」
+                  <p className="mt-1 text-sm leading-6 text-slate-700">
+                    儲存後會同步至各班電子黑板與頁首資訊列。
                   </p>
-                </div>
+                </header>
 
-                <form onSubmit={handleSaveConfig} className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label className="block text-xs font-black text-slate-700">
+                <form onSubmit={handleSaveConfig} className="space-y-5 p-4 sm:p-6">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block min-w-0 text-sm font-bold text-slate-800">
                       學校名稱
                       <input
                         type="text"
                         disabled={savingConfig} value={configForm.schoolName}
                         onChange={(e) => updateConfigDraft({ ...configForm, schoolName: e.target.value })}
-                        className="mt-1 w-full text-sm font-black p-2.5 rounded-xl border border-slate-300"
+                        className={settingsField}
                       />
                     </label>
-                    <label className="block text-xs font-black text-slate-700">
+                    <label className="block min-w-0 text-sm font-bold text-slate-800">
                       學年度與學期
                       <input
                         type="text"
                         disabled={savingConfig} value={configForm.academicYear}
                         onChange={(e) => updateConfigDraft({ ...configForm, academicYear: e.target.value })}
-                        className="mt-1 w-full text-sm font-black p-2.5 rounded-xl border border-slate-300"
+                        className={settingsField}
                       />
                     </label>
                   </div>
-                  <label className="block text-xs font-black text-slate-700">
+                  <label className="block text-sm font-bold text-slate-800">
                     段考名稱
                     <input type="text" disabled={savingConfig} value={configForm.examName}
                       onChange={(e) => updateConfigDraft({ ...configForm, examName: e.target.value })}
-                      className="mt-1 w-full text-sm font-black p-2.5 rounded-xl border border-slate-300" />
+                      className={settingsField} />
                   </label>
 
-                  <label className="block text-xs font-black text-slate-700">
+                  <label className="block text-sm font-bold text-slate-800">
                     考場守則（每行一項）
                     <textarea
-                      rows={3}
+                      rows={4}
                       disabled={savingConfig} value={configForm.rulesNotes.join('\n')}
                       onChange={(e) => updateConfigDraft({ ...configForm, rulesNotes: e.target.value.split('\n') })}
-                      className="mt-1 w-full text-sm font-black p-2.5 rounded-xl border border-slate-300"
+                      className={settingsField}
                     />
                   </label>
-                  <button
-                    type="submit"
-                    disabled={savingConfig}
-                    className="w-full min-h-[48px] py-3 bg-teal-800 hover:bg-teal-900 text-white font-black rounded-xl text-sm cursor-pointer shadow-xs disabled:opacity-50"
-                  >
-                    {savingConfig ? '儲存中…' : '儲存考務設定'}
-                  </button>
-                  {configSaveError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-900">{configSaveError}</p>}
-                  {configSaved && (
-                    <div role="status" className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-black text-emerald-700 text-center">
-                      考試基本資料已儲存。
-                    </div>
-                  )}
+                  <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 pt-4">
+                    {configSaveError && <p role="alert" className="w-full rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-900 sm:w-auto sm:flex-1">{configSaveError}</p>}
+                    {configSaved && <p role="status" className="w-full rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-900 sm:w-auto sm:flex-1">考試基本資料已儲存。</p>}
+                    <button type="submit" disabled={savingConfig}
+                      className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-violet-800 px-5 text-sm font-bold text-white hover:bg-violet-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 disabled:opacity-50 sm:w-auto">
+                      <Check size={17} aria-hidden="true" />{savingConfig ? '儲存中…' : '儲存考務設定'}
+                    </button>
+                  </div>
                 </form>
-              </div>
-
+              </section>
             )}
             {activeSettingsPage === 'classrooms' && (
               <ClassroomSettings data={sourceData} onManageInvigilation={() => setActiveTab('assign')} />
@@ -2209,8 +2039,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
         {/* TAB 5: 全校監考教師名冊匯入與獨立帳號管理 (獨立頁面 /admin/teachers) */}
         {activeTab === 'teachers' && (
          <div className="space-y-4 sm:space-y-5">
-            <header className="rounded-2xl border border-teal-200 bg-linear-to-br from-white via-teal-50 to-sky-50 p-4 sm:p-6">
-              <p className="flex items-center gap-2 text-sm font-bold text-teal-800"><Users size={17} aria-hidden="true" />教師帳號管理</p>
+            <header className="view-header-banner rounded-2xl border border-(--header-edge) p-4 sm:p-6">
+              <p className="flex items-center gap-2 text-sm font-bold text-violet-800"><Users size={17} aria-hidden="true" />教師帳號管理</p>
               <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">全校監考教師名冊</h2>
               <p className="mt-2 text-sm leading-6 text-slate-700">從檔案一次匯入多位教師，或管理個別登入帳號與出題指派。</p>
             </header>
@@ -2218,7 +2048,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <div className="grid gap-3 lg:grid-cols-2">
               <section aria-labelledby="teacher-batch-title" className="flex min-w-0 flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
                 <div className="flex items-start gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-teal-100 text-teal-900"><Upload size={19} aria-hidden="true" /></span>
+                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-violet-100 text-violet-900"><Upload size={19} aria-hidden="true" /></span>
                   <div>
                     <h3 id="teacher-batch-title" className="font-black text-slate-950">批次匯入與匯出</h3>
                     <p className="mt-1 text-sm leading-6 text-slate-700">使用 CSV 或 TXT，每次最多匯入 50 位教師。</p>
@@ -2238,7 +2068,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </section>
               <section aria-labelledby="teacher-account-title" className="flex min-w-0 flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
                 <div className="flex items-start gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-sky-100 text-sky-900"><UserPlus size={19} aria-hidden="true" /></span>
+                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-violet-100 text-violet-900"><UserPlus size={19} aria-hidden="true" /></span>
                   <div>
                     <h3 id="teacher-account-title" className="font-black text-slate-950">個別帳號管理</h3>
                     <p className="mt-1 text-sm leading-6 text-slate-700">新增教師登入帳號，或從下方名冊編輯資料、重設密碼與設定出題指派。</p>
@@ -2255,7 +2085,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </section>
             </div>
 
-            {teacherPending && <p role="status" className="rounded-xl bg-teal-50 p-3 text-sm font-bold text-teal-900">{teacherPending}</p>}
+            {teacherPending && <p role="status" className="rounded-xl bg-violet-50 p-3 text-sm font-bold text-violet-900">{teacherPending}</p>}
             {teacherFeedback && (
               <div
                 role={teacherFeedback.type === 'ok' ? 'status' : 'alert'}
@@ -2281,8 +2111,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
               className="no-print fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/65"
             >
               <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
-                <header className="shrink-0 border-b border-teal-100 bg-teal-50 p-4 sm:px-6">
-                  <h3 id="teacher-import-title" className="flex items-center gap-2 text-lg font-black"><Upload size={20} className="text-teal-800" aria-hidden="true" />匯入教師名冊</h3>
+                <header className="shrink-0 border-b border-violet-100 bg-violet-50 p-4 sm:px-6">
+                  <h3 id="teacher-import-title" className="flex items-center gap-2 text-lg font-black"><Upload size={20} className="text-violet-800" aria-hidden="true" />匯入教師名冊</h3>
                   <p className="mt-1 text-sm leading-6 text-slate-700">
                     每次最多 50 筆。使用匯入範本準備檔案，先預覽名單，再確認匯入。
                   </p>
@@ -2295,7 +2125,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       <option value="replace">覆蓋名冊（未列入者將移除）</option>
                     </select>
                   </label>
-                  <label className="block cursor-pointer rounded-xl border border-dashed border-teal-300 bg-teal-50 p-3 text-sm font-bold focus-within:ring-2 focus-within:ring-teal-700">
+                  <label className="block cursor-pointer rounded-xl border border-dashed border-violet-300 bg-violet-50 p-3 text-sm font-bold focus-within:ring-2 focus-within:ring-violet-700">
                     2　上傳 UTF-8 CSV 或 TXT
                     <input type="file" accept=".csv,.txt,text/csv,text/plain" disabled={Boolean(teacherPending)}
                       aria-label="選擇 UTF-8 CSV 或 TXT 檔案" className="peer sr-only"
@@ -2305,7 +2135,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         if (selected) void selectTeacherImportFile(selected);
                       }} />
                     <span className="mt-2 flex min-h-11 flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1.5 peer-disabled:opacity-50">
-                      <span className="rounded-md bg-teal-100 px-2 py-1.5 text-teal-950">{teacherImportFile ? '更換檔案' : '選擇檔案'}</span>
+                      <span className="rounded-md bg-violet-100 px-2 py-1.5 text-violet-950">{teacherImportFile ? '更換檔案' : '選擇檔案'}</span>
                       <span className="min-w-0 px-1 font-normal text-slate-700 [overflow-wrap:anywhere]">{teacherImportFile?.name ?? '尚未選擇檔案'}</span>
                     </span>
                   </label>
@@ -2323,7 +2153,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     }} className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 hover:bg-slate-50">重新預覽</button>
                   )}
                   {teacherImportRows && <>
-                    <p role="status" className="text-sm font-bold text-teal-900">
+                    <p role="status" className="text-sm font-bold text-violet-900">
                       3　核對預覽 · {teacherImportRows.length} 筆將{batchImportMode === 'replace' ? '覆蓋匯入' : '新增或更新'}
                       {batchImportMode === 'replace' ? ` · 將移除未列入的 ${teachersList.filter((teacher) => !teacherImportRows.some((row) => row.username === teacher.username)).length} 位教師` : ''}
                     </p>
@@ -2339,7 +2169,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             <p className="font-black text-slate-950">{row.name} · {row.username}</p>
                             <p className="mt-0.5 text-xs text-slate-700">{row.department} · {row.assignedClassId || '沿用原預設考場或不指派'}</p>
                           </div>
-                          <span className="shrink-0 rounded-full bg-teal-50 px-2 py-1 text-xs font-bold text-teal-900">{teachersList.some((teacher) => teacher.username === row.username) ? '更新' : '新增'}</span>
+                          <span className="shrink-0 rounded-full bg-violet-50 px-2 py-1 text-xs font-bold text-violet-900">{teachersList.some((teacher) => teacher.username === row.username) ? '更新' : '新增'}</span>
                         </li>
                       ))}
                     </ul>
@@ -2349,7 +2179,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <button type="button" disabled={Boolean(teacherPending)} onClick={() => teacherImportDialog.current?.close()}
                     className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50">關閉</button>
                   <button type="button" disabled={Boolean(teacherPending) || !teacherImportRows?.length}
-                    className={`min-h-11 rounded-xl px-4 text-sm font-bold text-white disabled:opacity-50 ${batchImportMode === 'replace' ? 'bg-rose-700 hover:bg-rose-800' : 'bg-teal-800 hover:bg-teal-900'}`}
+                    className={`min-h-11 rounded-xl px-4 text-sm font-bold text-white disabled:opacity-50 ${batchImportMode === 'replace' ? 'bg-rose-700 hover:bg-rose-800' : 'bg-violet-800 hover:bg-violet-900'}`}
                     onClick={() => void confirmTeacherFileImport()}>確認匯入</button>
                 </footer>
               </div>
@@ -2361,9 +2191,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
               className="no-print fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/65"
             >
               <form onSubmit={handleSaveSingleTeacher} className="flex max-h-[calc(100dvh-2rem-2px)] flex-col">
-                <header className="shrink-0 border-b border-teal-100 bg-teal-50 px-4 py-4 sm:px-6">
+                <header className="shrink-0 border-b border-violet-100 bg-violet-50 px-4 py-4 sm:px-6">
                   <h3 id="teacher-form-title" className="flex items-center gap-2 text-lg font-black">
-                    <UserPlus size={20} className="shrink-0 text-teal-800" aria-hidden="true" />
+                    <UserPlus size={20} className="shrink-0 text-violet-800" aria-hidden="true" />
                     {editingTeacherId ? '編輯教師帳號與出題指派' : '新增教師帳號與出題指派'}
                   </h3>
                   <p className="mt-1 text-sm text-slate-700">管理教師登入資料，並從已儲存的考程表選擇出題科目。</p>
@@ -2371,7 +2201,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <div className="min-h-0 flex-auto overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
                   <fieldset disabled={savingTeacher} className="min-w-0 space-y-4">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <h4 className="text-sm font-black text-teal-900 sm:col-span-2">登入帳號與基本資料</h4>
+                      <h4 className="text-sm font-black text-violet-900 sm:col-span-2">登入帳號與基本資料</h4>
                       <div>
                         <label htmlFor="admin-tch-name-form" className="mb-1 block text-sm font-bold text-slate-800">
                           教師姓名 *
@@ -2429,11 +2259,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       </div>
 
                     </div>
-                    <fieldset className="min-w-0 space-y-3 rounded-xl border border-teal-200 bg-teal-50 p-3">
-                      <legend className="px-1 text-sm font-black text-teal-950">出題科目與年級</legend>
-                      <p className="text-xs leading-5 text-teal-900">教師可為指派的科目與年級提交試題更正，教務核准後才會發布。</p>
+                    <fieldset className="min-w-0 space-y-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+                      <legend className="px-1 text-sm font-black text-violet-950">出題科目與年級</legend>
+                      <p className="text-xs leading-5 text-violet-900">教師可為指派的科目與年級提交試題更正，教務核准後才會發布。</p>
                       {tchAuthorAssignments.map((assignment, index) => (
-                        <div key={index} className="grid items-end gap-2 rounded-lg border border-teal-100 bg-white p-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                        <div key={index} className="grid items-end gap-2 rounded-lg border border-violet-100 bg-white p-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                           <label className="min-w-0 text-xs font-bold text-slate-700">第 {index + 1} 項出題科目
                             <select required value={assignment.subject}
                               onChange={(event) => updateAuthorAssignment(index, { subject: event.target.value })}
@@ -2464,10 +2294,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         </div>
                       ))}
                       {tchAuthorAssignments.length === 0 && <p className="text-xs text-slate-700">尚未指派出題科目與年級。</p>}
-                      {!examSubjects.length && <p className="text-xs font-bold text-teal-900">考程表尚無科目。請先到「考務設定 → 考程表」新增並儲存考試節次。</p>}
+                      {!examSubjects.length && <p className="text-xs font-bold text-violet-900">考程表尚無科目。請先到「考務設定 → 考程表」新增並儲存考試節次。</p>}
                       <button type="button" disabled={!examSubjects.length || !grades.length || tchAuthorAssignments.length >= MAX_EXAM_AUTHOR_ASSIGNMENTS}
                         onClick={() => setTchAuthorAssignments((current) => [...current, { subject: '', grade: 0 }])}
-                        className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-3 text-xs font-bold text-teal-900 hover:bg-teal-100 disabled:opacity-50">
+                        className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 text-xs font-bold text-violet-900 hover:bg-violet-100 disabled:opacity-50">
                         <Plus size={15} aria-hidden="true" />新增出題指派
                       </button>
                     </fieldset>
@@ -2478,7 +2308,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <div className="flex flex-wrap justify-end gap-2">
                     <button type="button" disabled={savingTeacher} onClick={() => teacherDialog.current?.close()}
                       className="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50">取消</button>
-                    <button type="submit" disabled={savingTeacher} className="min-h-11 rounded-xl bg-teal-800 px-4 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50">
+                    <button type="submit" disabled={savingTeacher} className="min-h-11 rounded-xl bg-violet-800 px-4 text-sm font-bold text-white hover:bg-violet-900 disabled:opacity-50">
                       {savingTeacher ? '儲存中…' : editingTeacherId ? '儲存教師帳號設定' : '新增教師帳號'}
                     </button>
                   </div>
@@ -2490,7 +2320,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <h3 id="teacher-roster-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
-                    <Users size={20} className="text-teal-800" aria-hidden="true" />教師帳號清冊
+                    <Users size={20} className="text-violet-800" aria-hidden="true" />教師帳號清冊
                   </h3>
                   <p role="status" className="mt-1 text-sm text-slate-600">顯示 {visibleTeachers.length} / {teachersList.length} 位教師</p>
                 </div>
@@ -2507,13 +2337,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <div role="group" aria-label="排班狀態篩選" className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
                 {teacherFilters.map(({ id, label, count }) => (
                   <button key={id} type="button" aria-pressed={teacherAssignFilter === id} onClick={() => setTeacherAssignFilter(id)}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-teal-400 hover:bg-teal-50 aria-pressed:border-teal-700 aria-pressed:bg-teal-100 aria-pressed:text-teal-950">
+                    className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-violet-400 hover:bg-violet-50 aria-pressed:border-violet-700 aria-pressed:bg-violet-100 aria-pressed:text-violet-950">
                     {label}<span className="rounded-full bg-white px-2 py-0.5 text-xs font-black text-slate-700">{count}</span>
                   </button>
                 ))}
                 {(teacherSearch || teacherAssignFilter !== 'all') && (
                   <button type="button" onClick={() => { setTeacherSearch(''); setTeacherAssignFilter('all'); }}
-                    className="min-h-11 rounded-xl px-3 text-sm font-bold text-teal-800 hover:bg-teal-50">清除篩選</button>
+                    className="min-h-11 rounded-xl px-3 text-sm font-bold text-violet-800 hover:bg-violet-50">清除篩選</button>
                 )}
               </div>
               {visibleTeachers.length ? (
@@ -2526,13 +2356,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       const room = sourceData.classrooms.find((item) => item.classId === teacher.assignedClassId);
                       const slots = teacherSlots.get(teacher.id) ?? [];
                       return (
-                        <li key={teacher.id} className={'grid min-w-0 gap-3 rounded-xl border border-slate-200 bg-white p-3 hover:border-teal-200 sm:grid-cols-2 xl:items-start xl:px-4 ' + teacherRowColumns}>
+                        <li key={teacher.id} className={'grid min-w-0 gap-3 rounded-xl border border-slate-200 bg-white p-3 hover:border-violet-200 sm:grid-cols-2 xl:items-start xl:px-4 ' + teacherRowColumns}>
                           <div className="min-w-0 sm:col-span-2 xl:col-span-1">
                             <h4 className="text-base font-black text-slate-950 [overflow-wrap:anywhere]">{teacher.name}</h4>
                             {!!teacher.examAuthorAssignments?.length && (
                               <ul aria-label="出題科目與年級" className="mt-1.5 flex flex-wrap gap-1">
                                 {teacher.examAuthorAssignments.map((item) => (
-                                  <li key={JSON.stringify(item)} className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-bold text-teal-950 [overflow-wrap:anywhere]">{authorAssignmentLabel(item)}</li>
+                                  <li key={JSON.stringify(item)} className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-950 [overflow-wrap:anywhere]">{authorAssignmentLabel(item)}</li>
                                 ))}
                               </ul>
                             )}
@@ -2553,7 +2383,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             {room && <p className="mt-1 text-xs font-bold text-slate-700 [overflow-wrap:anywhere]">預設考場 · {room.classId} {room.className}</p>}
                             {slots.length > 0 && (
                               <details className="mt-1">
-                                <summary className="min-h-8 cursor-pointer rounded-lg py-1 text-xs font-bold text-teal-800 hover:underline">查看 {slots.length} 節監考</summary>
+                                <summary className="min-h-8 cursor-pointer rounded-lg py-1 text-xs font-bold text-violet-800 hover:underline">查看 {slots.length} 節監考</summary>
                                 <ul className="space-y-1 rounded-lg bg-slate-50 p-2 text-xs leading-5 text-slate-700">
                                   {slots.map((slot, index) => <li key={index} className="[overflow-wrap:anywhere]">{slot}</li>)}
                                 </ul>

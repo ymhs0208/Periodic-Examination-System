@@ -66,21 +66,21 @@ export function ExamResetSettings({ data }: { data: SystemData }) {
         {scopes.map((scope) => {
           const option = options[scope];
           return (
-            <div key={scope} className={`flex min-w-0 flex-col gap-3 rounded-xl border p-4 ${scope === 'current' ? 'border-teal-200 bg-teal-50' : 'border-rose-200 bg-rose-50'}`}>
+            <div key={scope} className={`flex min-w-0 flex-col gap-3 rounded-xl border p-4 ${scope === 'current' ? 'border-amber-200 bg-amber-50' : 'border-rose-200 bg-rose-50'}`}>
               <h4 className="font-black text-slate-950">{option.title}</h4>
               <dl className="space-y-2 text-sm leading-6 text-slate-700">
                 <div><dt className="font-bold">清除</dt><dd>{option.removed}</dd></div>
                 <div><dt className="font-bold">保留</dt><dd>{option.retained}</dd></div>
               </dl>
               <button type="button" disabled={Boolean(busy)} onClick={() => void reset(scope)}
-                className={`mt-auto inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-xl px-4 text-sm font-bold disabled:opacity-50 ${scope === 'current' ? 'border border-teal-300 bg-white text-teal-900 hover:bg-teal-100' : 'bg-rose-800 text-white hover:bg-rose-900'}`}>
+                className={`mt-auto inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-xl px-4 text-sm font-bold disabled:opacity-50 ${scope === 'current' ? 'border border-amber-300 bg-white text-amber-950 hover:bg-amber-100' : 'bg-rose-800 text-white hover:bg-rose-900'}`}>
                 <Trash2 size={17} aria-hidden="true" />{busy === scope ? '清除中…' : option.title}
               </button>
             </div>
           );
         })}
       </div>
-      {feedback && <p role={feedback.error ? 'alert' : 'status'} className={`rounded-xl p-3 text-sm font-bold ${feedback.error ? 'bg-rose-50 text-rose-950' : 'bg-teal-50 text-teal-950'}`}>{feedback.text}</p>}
+      {feedback && <p role={feedback.error ? 'alert' : 'status'} className={`rounded-xl p-3 text-sm font-bold ${feedback.error ? 'bg-rose-50 text-rose-950' : 'bg-emerald-50 text-emerald-950'}`}>{feedback.text}</p>}
     </section>
   );
 }

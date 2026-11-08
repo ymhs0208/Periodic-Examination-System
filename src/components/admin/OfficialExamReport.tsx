@@ -161,12 +161,14 @@ export function OfficialExamReport({ data, classrooms, detailScope, audienceLabe
   return (
     <article className="official-report" aria-labelledby="official-report-title">
       <div className="official-report-cover">
-        <div className="official-report-kicker"><span>教務處試務中心</span><span>備查聯</span></div>
-        {config.schoolName && <p className="official-report-school">{config.schoolName}</p>}
-        <h2 id="official-report-title">段考考務出缺席暨試務報表</h2>
-        <div className="official-report-reference">
-          <span>報表編號 <strong>{serial}</strong></span>
-          <span>製表時間 <strong>{timestamp(createdAt)}</strong>（臺北時間）</span>
+        <div className="official-report-masthead">
+          <div className="official-report-kicker"><span>教務處試務中心</span><span>備查聯</span></div>
+          {config.schoolName && <p className="official-report-school">{config.schoolName}</p>}
+          <h2 id="official-report-title">段考考務出缺席暨試務報表</h2>
+          <div className="official-report-reference">
+            <span>報表編號 <strong>{serial}</strong></span>
+            <span>製表時間 <strong>{timestamp(createdAt)}</strong>（臺北時間）</span>
+          </div>
         </div>
         <dl className="official-report-facts">
           {fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '未設定'}</dd></div>)}

@@ -19,11 +19,11 @@ export function BoardPortals({ onNavigate }: { onNavigate?: (view: BoardPortalVi
             event.preventDefault();
             onNavigate(view);
           }}
-          className="flex min-h-52 flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700 sm:p-7">
-          <span className="grid size-14 place-items-center rounded-2xl bg-teal-50 text-teal-800"><Icon size={28} aria-hidden="true" /></span>
+          className="flex min-h-52 flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm hover:border-teal-300 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700 admin-theme:hover:border-violet-300 admin-theme:hover:bg-violet-50 admin-theme:focus-visible:outline-violet-700 sm:p-7">
+          <span className="grid size-14 place-items-center rounded-2xl bg-teal-50 text-teal-800 admin-theme:bg-violet-50 admin-theme:text-violet-800"><Icon size={28} aria-hidden="true" /></span>
           <span className="mt-6 text-2xl font-black text-slate-950">{label}</span>
           <span className="mt-2 text-sm leading-6 text-slate-600">{description}</span>
-          <span className="mt-auto pt-6 text-sm font-bold text-teal-800">開啟</span>
+          <span className="mt-auto pt-6 text-sm font-bold text-teal-800 admin-theme:text-violet-800">開啟</span>
         </a>
       ))}
     </nav>
@@ -45,11 +45,10 @@ export function BoardPortalHome({
 }) {
   return (
     <div className="flex w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-[#e7eef2] shadow-sm">
-      <section className="attendance-banner no-print relative isolate overflow-hidden px-5 py-7 text-white sm:px-10 sm:py-10">
-        <div className="attendance-banner-pattern pointer-events-none absolute inset-0 -z-10" aria-hidden="true" />
-        <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-teal-200">{eyebrow}</p>
+      <section className="view-header-banner no-print px-5 py-7 text-slate-950 sm:px-10 sm:py-10">
+        <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-(--header-accent)">{eyebrow}</p>
         <h1 className="mt-3 max-w-3xl text-3xl font-black tracking-tight sm:text-5xl">{title}</h1>
-        {details && <p className="mt-3 text-sm text-slate-200 sm:text-base">{details}</p>}
+        {details && <p className="mt-3 text-sm text-slate-700 sm:text-base">{details}</p>}
       </section>
       <div className="flex-1 p-5 sm:p-10">
         <BoardPortals onNavigate={onNavigate} />

@@ -86,11 +86,11 @@ export function useActionConfirmation() {
         </div>
         <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-4 py-3 sm:px-6">
           <button ref={cancelRef} type="button" onClick={() => finish(false)}
-            className="min-h-11 cursor-pointer rounded-xl border border-slate-300 px-4 text-sm font-bold hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700">
+            className="min-h-11 cursor-pointer rounded-xl border border-slate-300 px-4 text-sm font-bold hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 admin-theme:focus-visible:outline-violet-700">
             取消
           </button>
           <button type="button" onClick={() => finish(true)} disabled={!canConfirm}
-            className={`min-h-11 cursor-pointer rounded-xl px-4 text-sm font-bold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-default disabled:opacity-50 ${confirmation.danger ? 'bg-rose-800 hover:bg-rose-900' : 'bg-teal-800 hover:bg-teal-900'}`}>
+            className={`min-h-11 cursor-pointer rounded-xl px-4 text-sm font-bold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 admin-theme:focus-visible:outline-violet-700 disabled:cursor-default disabled:opacity-50 ${confirmation.danger ? 'bg-rose-800 hover:bg-rose-900' : 'bg-teal-800 hover:bg-teal-900 admin-theme:bg-violet-800 admin-theme:hover:bg-violet-900'}`}>
             {confirmation.confirmLabel}
           </button>
         </footer>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import {
   ArrowRight, Building2, ChevronDown, ClipboardCheck, GraduationCap, History, KeyRound, LayoutGrid,
-  LogOut, Settings, ShieldCheck, UserCheck, Users, X, type LucideIcon
+  LogOut, Settings, ShieldCheck, UserCheck, UserRoundCog, Users, X, type LucideIcon
 } from 'lucide-react';
 import type { AdminTab } from './admin/AdminView';
 import type { PolicyView } from './PolicyPage';
@@ -42,8 +42,11 @@ interface NavigationItem {
   icon: LucideIcon;
 }
 
+const adminHomeItem: NavigationItem = {
+  view: 'admin', label: '教務管理中心', description: '開啟教室黑板、出席看板與教務處看板', icon: Building2
+};
+
 const adminItems: NavigationItem[] = [
-  { view: 'admin', label: '教務管理中心', description: '開啟教室黑板、出席看板與教務處看板', icon: Building2 },
   { view: 'admin', tab: 'matrix', label: '考場看板', description: '查看各班點名進度與考場狀況', icon: LayoutGrid },
   { view: 'admin', tab: 'teachers', label: '教師帳號管理', description: '匯入名冊與管理登入帳號', icon: Users },
   { view: 'admin', tab: 'assign', label: '監考指派', description: '安排各班的監考老師', icon: UserCheck },
@@ -59,6 +62,7 @@ const invigilatorItem: NavigationItem = {
 };
 
 const focusStyle = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500';
+const accountAction = 'inline-flex min-h-11 cursor-pointer items-center justify-center gap-1.5 px-2 py-2 text-sm font-bold text-stone-800 hover:bg-stone-200 disabled:cursor-default disabled:opacity-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-700';
 
 function itemPath(item: NavigationItem) {
   return item.tab ? `/admin/${item.tab}` : VIEW_PATHS[item.view];
@@ -123,19 +127,27 @@ export function Header({
     else onViewChange(view);
   }
 
-  const groups = [
-    ...(isAdminAuthed ? [{ label: '教務管理中心', items: adminItems }] : []),
-    { label: '考場作業', items: [canSubmitCorrections
-      ? { ...invigilatorItem, description: '查看監考安排與試題更正送審' }
-      : invigilatorItem] }
-  ];
+  const teacherHomeItem = canSubmitCorrections
+    ? { ...invigilatorItem, description: '查看監考安排與試題更正送審' }
+    : invigilatorItem;
+  const primaryItem = isAdminAuthed ? adminHomeItem : teacherHomeItem;
+  const PrimaryIcon = primaryItem.icon;
 
   function isActiveItem(item: NavigationItem) {
     if (activeView !== item.view) return false;
     if (item.view !== 'admin') return true;
-    const matchesTab = (entry: NavigationItem) => currentPath === itemPath(entry) || currentPath.startsWith(`${itemPath(entry)}/`);
-    if (item.tab) return matchesTab(item);
-    return !adminItems.some((entry) => entry.tab && matchesTab(entry));
+    const path = itemPath(item);
+    return currentPath === path || Boolean(item.tab && currentPath.startsWith(`${path}/`));
+  }
+
+  function closeAccountPanel() {
+    setIsMenuOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function logoutFromPanel() {
+    closeAccountPanel();
+    onLogout();
   }
 
   return (
@@ -173,7 +185,7 @@ export function Header({
               aria-expanded={menuVisible}
               aria-controls="account-panel"
               onClick={() => setIsMenuOpen((open) => !open)}
-              className={`inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-800 hover:bg-slate-50 aria-expanded:border-teal-300 aria-expanded:bg-teal-50 sm:px-3 sm:text-sm ${focusStyle}`}
+              className={`inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-stone-200 bg-white px-2.5 text-xs font-bold text-stone-800 hover:bg-stone-50 aria-expanded:border-stone-300 aria-expanded:bg-stone-100 sm:px-3 sm:text-sm ${focusStyle}`}
             >
               <RoleIcon size={17} className="shrink-0 text-teal-800" aria-hidden="true" />
               <span>{roleLabel}</span>
@@ -194,70 +206,63 @@ export function Header({
             <div
               ref={panelRef}
               id="account-panel"
-              className="absolute inset-x-3 top-full z-50 mt-2 flex max-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-xl sm:inset-x-auto sm:right-6 sm:w-96 md:right-0 md:mt-4 md:max-h-[calc(100dvh-6rem)]"
+              className="absolute inset-x-3 top-full z-50 mt-2 flex max-h-[calc(100dvh-5rem)] flex-col overflow-hidden rounded-3xl border border-stone-200 bg-white text-stone-950 shadow-xl sm:inset-x-auto sm:right-6 sm:w-[26rem] md:right-0 md:max-h-[calc(100dvh-6rem)]"
             >
-              <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-teal-50 px-4 py-3 text-slate-950">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-teal-800">
-                  <RoleIcon size={20} aria-hidden="true" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-teal-800">{roleLabel}</p>
-                  <p className="mt-0.5 truncate text-sm font-black" title={loggedInUsername}>{loggedInUsername || '已登入'}</p>
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-4 sm:px-5 sm:pt-5">
+                <div className="flex items-start gap-3 border-b border-stone-200 pb-4">
+                  <span className={`grid size-12 shrink-0 place-items-center rounded-full sm:size-14 ${isAdminAuthed ? 'bg-violet-100 text-violet-800' : 'bg-sky-100 text-sky-800'}`}>
+                    <RoleIcon size={25} aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-lg font-black leading-tight [overflow-wrap:anywhere]" title={loggedInUsername}>{loggedInUsername || '已登入'}</p>
+                    <p className="mt-1.5 text-sm font-semibold text-stone-600">{roleLabel}</p>
+                  </div>
+                  <button type="button" onClick={closeAccountPanel} aria-label="關閉帳號選單"
+                    className={`grid size-11 shrink-0 cursor-pointer place-items-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-100 ${focusStyle}`}>
+                    <X size={18} aria-hidden="true" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    triggerRef.current?.focus();
-                  }}
-                  aria-label="關閉帳號選單"
-                  className={`grid size-10 shrink-0 cursor-pointer place-items-center rounded-xl text-slate-700 hover:bg-white ${focusStyle}`}
-                >
-                  <X size={18} aria-hidden="true" />
-                </button>
+
+                <nav aria-label="帳號功能" className="space-y-3 py-4">
+                  <a href={itemPath(primaryItem)} onClick={(event) => navigate(event, primaryItem.view)}
+                    aria-current={isActiveItem(primaryItem) ? 'page' : undefined}
+                    className={`flex min-h-12 items-center justify-center gap-2 rounded-xl bg-stone-950 px-3 py-2.5 text-center text-base font-bold text-white hover:bg-stone-800 ${focusStyle}`}>
+                    <PrimaryIcon size={18} className="shrink-0" aria-hidden="true" />{primaryItem.label}
+                    <ArrowRight size={16} className="shrink-0" aria-hidden="true" />
+                  </a>
+                  <p className="text-center text-xs leading-5 text-stone-600">{primaryItem.description}</p>
+                  {isAdminAuthed && (
+                    <div role="group" aria-label="常用入口" className="grid grid-cols-2 gap-1.5">
+                      {[...adminItems, teacherHomeItem].map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <a
+                            key={itemPath(item)}
+                            href={itemPath(item)}
+                            onClick={(event) => navigate(event, item.view, item.tab)}
+                            aria-current={isActiveItem(item) ? 'page' : undefined}
+                            title={item.description}
+                            className={`group flex min-h-11 min-w-0 items-center gap-1.5 rounded-xl px-2 py-1.5 text-sm font-bold text-stone-800 hover:bg-stone-100 aria-[current=page]:bg-violet-50 aria-[current=page]:text-violet-900 ${focusStyle}`}
+                          >
+                            <Icon size={16} className="shrink-0 text-stone-500 group-aria-[current=page]:text-violet-800" aria-hidden="true" />
+                            <span>{item.label}</span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                  )}
+                </nav>
               </div>
 
-              <nav aria-label="帳號功能" className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-2.5 py-2.5">
-                {groups.map((group) => (
-                  <section key={group.label} aria-label={group.label}>
-                    <h2 className="px-2 pb-1 text-xs font-bold text-slate-600">{group.label}</h2>
-                    {group.items.map((item) => {
-                      const Icon = item.icon;
-                      const active = isActiveItem(item);
-                      return (
-                        <a
-                          key={itemPath(item)}
-                          href={itemPath(item)}
-                          onClick={(event) => navigate(event, item.view, item.tab)}
-                          aria-current={active ? 'page' : undefined}
-                          className={`group flex min-h-12 items-center gap-2.5 rounded-xl px-2 py-1.5 hover:bg-slate-100 aria-[current=page]:bg-teal-50 ${focusStyle}`}
-                        >
-                          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 group-aria-[current=page]:bg-teal-100 group-aria-[current=page]:text-teal-800">
-                            <Icon size={16} aria-hidden="true" />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-bold group-aria-[current=page]:text-teal-900">{item.label}</span>
-                            <span className="block text-xs leading-4 text-slate-600">{item.description}</span>
-                          </span>
-                          <ArrowRight size={15} className="shrink-0 text-slate-500 group-aria-[current=page]:text-teal-800" aria-hidden="true" />
-                        </a>
-                      );
-                    })}
-                  </section>
-                ))}
-              </nav>
-
-              <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-slate-200 bg-slate-50 p-2.5">
-                <a href={VIEW_PATHS.login} onClick={(event) => { event.preventDefault(); setIsMenuOpen(false); onLogout(); }} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-2 text-xs font-bold hover:bg-slate-100 ${focusStyle}`}>
-                  <KeyRound size={15} aria-hidden="true" />登出並切換帳號
-                </a>
-                <button type="button" disabled={loggingOut} onClick={() => {
-                  setIsMenuOpen(false);
-                  triggerRef.current?.focus();
-                  onLogout();
-                }} className={`inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-rose-50 px-2 text-xs font-bold text-rose-800 hover:bg-rose-100 disabled:opacity-50 ${focusStyle}`}>
-                  <LogOut size={15} aria-hidden="true" />{loggingOut ? '登出中…' : '登出'}
-                </button>
+              <div className="shrink-0 bg-white px-4 pb-4 sm:px-5 sm:pb-5">
+                <div className="grid grid-cols-2 divide-x divide-stone-300/60 overflow-hidden rounded-xl border border-stone-200 bg-stone-100">
+                  <button type="button" disabled={loggingOut} onClick={logoutFromPanel} className={accountAction}>
+                    <UserRoundCog size={16} aria-hidden="true" />切換帳號
+                  </button>
+                  <button type="button" disabled={loggingOut} onClick={logoutFromPanel} className={accountAction}>
+                    <LogOut size={16} aria-hidden="true" />{loggingOut ? '登出中…' : '登出'}
+                  </button>
+                </div>
               </div>
             </div>
           )}

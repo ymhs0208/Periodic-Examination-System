@@ -169,7 +169,7 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
     </button>
   </div>;
   return <section ref={boardRef} className={`academic-board${projection ? ' academic-board--projection' : ''}`} aria-labelledby="academic-board-title">
-    <header className="academic-header">
+    <header className="academic-header view-header-banner">
       <div className="academic-toolbar">
         <div className="academic-brand">
           <span className="academic-brand-icon"><Monitor size={17} aria-hidden="true" /></span>

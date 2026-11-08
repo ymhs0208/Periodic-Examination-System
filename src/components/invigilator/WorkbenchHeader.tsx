@@ -16,7 +16,7 @@ export function WorkbenchHeader({ tab, info = [], actions }: {
   const page = invigilatorPage(tab);
   const Icon = page.icon;
   return (
-    <header className="wb-hero">
+    <header className="wb-hero view-header-banner">
       <div className="wb-hero-top">
         <div className="min-w-0">
           <p className="wb-eyebrow"><Icon size={16} aria-hidden="true" />教師工作台</p>

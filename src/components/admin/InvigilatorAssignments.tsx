@@ -1,6 +1,6 @@
 import { serverNow } from '../../types/time';
 import { useLayoutEffect, useRef, useState } from 'react';
-import { CalendarClock, CheckCircle2, ClipboardList, Pencil, Search, UserPlus, UsersRound } from 'lucide-react';
+import { CalendarClock, CheckCircle2, ClipboardList, DoorOpen, Pencil, Search, UserPlus, UsersRound } from 'lucide-react';
 import { examSync } from '../../services/examSync';
 import type { ClassroomExamState, ExamPeriod, SystemData, TeacherAccount } from '../../types/exam';
 import { availableGrades, gradeLabel } from '../../types/grades';
@@ -12,10 +12,12 @@ type AssignmentFilter = 'all' | 'pending' | 'assigned';
 type EditorSelection = { classId: string; periodId?: string; periodLabel: string; teacherId: string | null };
 type TeacherChoice = { teacher: TeacherAccount; otherRoom?: string };
 
-const field = 'mt-1 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-950';
-const panel = 'min-w-0 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5';
+const field = 'mt-1 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-950 focus-visible:outline-2 focus-visible:outline-violet-700';
+const panel = 'min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm';
+const listColumns = 'sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_7.5rem]';
+const stepBadge = 'grid size-7 shrink-0 place-items-center rounded-lg bg-violet-100 text-sm font-black text-violet-900';
 const secondary = 'inline-flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:cursor-default disabled:opacity-50';
-const primary = 'inline-flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-teal-800 px-3 text-sm font-bold text-white hover:bg-teal-900 disabled:cursor-default disabled:opacity-50';
+const primary = 'inline-flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-violet-800 px-3 text-sm font-bold text-white hover:bg-violet-900 disabled:cursor-default disabled:opacity-50';
 
 function assignmentSource(room: ClassroomExamState, period: ExamPeriod | undefined, teacher: TeacherAccount | undefined) {
   if (!period) {
@@ -216,120 +218,155 @@ export function InvigilatorAssignments({ data, onManageTeachers, onOpenSchedule 
   }
 
   const filters = [
-    { value: 'all', label: '全部考場', count: classrooms.length },
-    { value: 'pending', label: '待指派', count: classrooms.length - assignedCount },
-    { value: 'assigned', label: '已指派', count: assignedCount }
+    { value: 'all', label: '全部考場', count: classrooms.length, tone: 'bg-violet-100 text-violet-900' },
+    { value: 'pending', label: '待指派', count: classrooms.length - assignedCount, tone: 'bg-amber-100 text-amber-900' },
+    { value: 'assigned', label: '已指派', count: assignedCount, tone: 'bg-emerald-100 text-emerald-900' }
   ] as const;
+  const hasFilters = status !== 'all' || Boolean(activeGrade) || Boolean(term);
+
+  function clearFilters() {
+    setStatus('all');
+    setGrade('');
+    setQuery('');
+  }
 
   return (
     <div className="space-y-4">
       {confirmationDialog}
-      <section className={panel} aria-labelledby="assignment-title">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 id="assignment-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
-              <ClipboardList size={20} className="text-teal-800" aria-hidden="true" />監考指派
-            </h3>
+      <header className="view-header-banner flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-(--header-edge) p-4 sm:p-5">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-(--header-edge) bg-white text-(--header-accent)">
+            <ClipboardList size={22} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">監考指派</h2>
             <p className="mt-1 text-sm leading-6 text-slate-700">選好節次後，直接從考場清單指派或更換老師。</p>
           </div>
-          <button type="button" onClick={onManageTeachers} className={secondary}><UsersRound size={16} aria-hidden="true" />管理教師名冊</button>
         </div>
-        <div className="mt-4 grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <label className="min-w-0 text-sm font-bold text-slate-800">1. 選擇考試節次
-            <select className={field} value={period?.id ?? '@default'} onChange={(event) => {
-              setRequestedPeriod(event.target.value);
-              setStatus('all');
-              setGrade('');
-              setQuery('');
-              setNotice('');
-            }}>
-              {[...periodsByDate].map(([date, day]) => (
-                <optgroup key={date} label={date || '舊考程'}>
-                  {day.map((item) => <option key={item.id} value={item.id}>{item.startTime}–{item.endTime} · {item.subject}</option>)}
-                </optgroup>
-              ))}
-              <option value="@default">考場預設（適用未單獨指派的節次）</option>
-            </select>
-          </label>
-          <ExamCsvImport kind="invigilation" disabled={editing || saving} />
-        </div>
-        <div className="mt-3 rounded-xl bg-teal-50 px-3 py-2.5 text-teal-950">
-          <p className="flex items-start gap-2 text-sm font-black [overflow-wrap:anywhere]"><CalendarClock size={17} className="mt-0.5 shrink-0" aria-hidden="true" />目前排班 · {scope}</p>
-          <p className="mt-1 text-xs leading-5">
-            {period ? '調整只影響這一節。清單會標示是否沿用考場預設老師。' : '考場預設會套用到未個別設定的節次。'}
-          </p>
-          {!periods.length && <p className="mt-1 text-xs leading-5">
-            尚未設定考程，可先安排考場預設老師。<a href="/admin/settings/schedule" className="font-bold underline underline-offset-2"
-              onClick={(event) => { if (onOpenSchedule && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { event.preventDefault(); onOpenSchedule(); } }}>前往考程表</a>
-          </p>}
-        </div>
-      </section>
+        <button type="button" onClick={onManageTeachers} className={secondary}><UsersRound size={16} aria-hidden="true" />管理教師名冊</button>
+      </header>
 
-      <section className={panel} aria-labelledby="assignment-list-title">
-        <h3 ref={listHeading} tabIndex={-1} id="assignment-list-title" className="text-lg font-black text-slate-950">2. 指派考場老師</h3>
-        {notice && <p role="status" className="mt-3 rounded-xl bg-teal-50 p-3 text-sm font-bold text-teal-900">{notice}</p>}
-        <div role="group" aria-label="依指派狀態篩選" className="mt-3 grid grid-cols-3 gap-2">
-          {filters.map(({ value, label, count }) => (
-            <button key={value} type="button" aria-pressed={status === value} onClick={() => setStatus(value)}
-              className="flex min-h-14 min-w-0 cursor-pointer flex-wrap items-center justify-center gap-x-1.5 rounded-xl border border-slate-200 px-1.5 py-2 text-xs font-bold text-slate-800 hover:bg-teal-50 aria-pressed:border-teal-800 aria-pressed:bg-teal-800 aria-pressed:text-white sm:text-sm">
-              {label}<strong className="font-mono text-lg tabular-nums">{count}</strong>
-            </button>
-          ))}
-        </div>
-        {classrooms.length > 0 && (
-          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.4fr)]">
-            <label className="min-w-0 text-sm font-bold text-slate-800">搜尋考場
-              <span className="relative block">
-                <Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="班級代號、班名或教師" className={`${field} pl-9`} />
-              </span>
-            </label>
-            <label className="min-w-0 text-sm font-bold text-slate-800">篩選年級
-              <select value={activeGrade} onChange={(event) => setGrade(event.target.value)} className={field}>
-                <option value="">全部年級</option>
-                {grades.map((item) => <option key={item} value={item}>{gradeLabel(config, item)}</option>)}
+      <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+        <section className={`${panel} p-3 sm:p-4`} aria-labelledby="assignment-scope-title">
+          <h3 id="assignment-scope-title" className="flex items-center gap-2 text-base font-black text-slate-950">
+            <span className={stepBadge}>1</span>選擇指派範圍
+          </h3>
+          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+            <label className="min-w-0 text-sm font-bold text-slate-800">考試節次
+              <select className={field} value={period?.id ?? '@default'} onChange={(event) => {
+                setRequestedPeriod(event.target.value);
+                clearFilters();
+                setNotice('');
+              }}>
+                {[...periodsByDate].map(([date, day]) => (
+                  <optgroup key={date} label={date || '舊考程'}>
+                    {day.map((item) => <option key={item.id} value={item.id}>{item.startTime}–{item.endTime} · {item.subject}</option>)}
+                  </optgroup>
+                ))}
+                <option value="@default">考場預設（適用未單獨指派的節次）</option>
               </select>
             </label>
+            <div className="rounded-xl border border-violet-100 bg-violet-50 p-3 text-violet-950">
+              <p className="flex items-center gap-1.5 text-xs font-bold"><CalendarClock size={16} aria-hidden="true" />目前排班</p>
+              <p className="mt-1 text-sm font-black [overflow-wrap:anywhere]">{scope}</p>
+              <p className="mt-1 text-xs leading-5">
+                {period ? '調整只套用到這一節。' : '套用到未個別指派的節次。'}
+              </p>
+              {!periods.length && <p className="mt-1 text-xs leading-5">
+                尚未設定考程。<a href="/admin/settings/schedule" className="font-bold underline underline-offset-2"
+                  onClick={(event) => { if (onOpenSchedule && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { event.preventDefault(); onOpenSchedule(); } }}>前往考程表</a>
+              </p>}
+            </div>
           </div>
-        )}
-        <p role="status" className="mt-3 text-sm font-bold text-slate-600">顯示 {visible.length} 間考場</p>
-        {visible.length ? (
-          <ul aria-label="監考指派清單" className="mt-2 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
-            {visible.map((room) => {
-              const teacher = teachersByRoom.get(room.classId);
-              const action = teacher ? '更換老師' : '指派老師';
-              return (
-                <li key={room.classId} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:px-4">
-                  <div className="min-w-0 [overflow-wrap:anywhere]">
-                    <strong className="block text-sm text-slate-950">{room.className}</strong>
-                    <p className="text-xs text-slate-600">{gradeLabel(config, room.grade)} · {room.classId}</p>
-                  </div>
-                  <div className="col-start-1 row-start-2 min-w-0 [overflow-wrap:anywhere] sm:col-start-2 sm:row-start-1">
-                    <strong className={`block text-sm ${teacher ? 'text-slate-950' : 'text-amber-900'}`}>{teacher?.name ?? '待指派'}</strong>
-                    <p className="text-xs text-slate-600">{assignmentSource(room, period, teacher)}</p>
-                  </div>
-                  <button type="button" onClick={() => openEditor(room)} aria-label={`${roomLabel(room.classId)} ${action}`}
-                    className={`${teacher ? secondary : primary} col-start-2 row-span-2 row-start-1 whitespace-nowrap sm:col-start-3 sm:row-span-1`}>
-                    {teacher ? <Pencil size={15} aria-hidden="true" /> : <UserPlus size={15} aria-hidden="true" />}{action}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        ) : <p className="mt-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-700">
-          {classrooms.length ? status === 'pending' && assignedCount === classrooms.length ? '此範圍的考場都已指派。' : '找不到符合條件的考場，請調整篩選。'
-            : data.classrooms.length ? '這一節沒有適用的考場，請確認考程的適用範圍。' : '尚未設定考場班級。'}
-        </p>}
-      </section>
+          <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+            <h4 className="text-sm font-bold text-slate-700">批次指派</h4>
+            <ExamCsvImport kind="invigilation" disabled={editing || saving} />
+          </div>
+        </section>
+
+        <section className={panel} aria-labelledby="assignment-list-title">
+          <div className="p-3 sm:p-4">
+            <h3 ref={listHeading} tabIndex={-1} id="assignment-list-title" className="flex items-center gap-2 text-base font-black text-slate-950">
+              <span className={stepBadge}>2</span>指派考場老師
+            </h3>
+            {notice && <p role="status" className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-900">{notice}</p>}
+            <div role="group" aria-label="依指派狀態篩選" className="mt-3 grid grid-cols-3 gap-2">
+              {filters.map(({ value, label, count, tone }) => (
+                <button key={value} type="button" aria-pressed={status === value} onClick={() => setStatus(value)}
+                  className="flex min-h-16 min-w-0 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 px-1.5 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50 aria-pressed:border-violet-400 aria-pressed:bg-violet-50 focus-visible:outline-2 focus-visible:outline-violet-700 sm:flex-row sm:gap-2 sm:text-sm">
+                  {label}<strong className={`rounded-md px-2 py-0.5 font-mono text-sm tabular-nums ${tone}`}>{count}</strong>
+                </button>
+              ))}
+            </div>
+            {classrooms.length > 0 && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.4fr)]">
+                <label className="min-w-0 text-sm font-bold text-slate-800">搜尋考場
+                  <span className="relative block">
+                    <Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="班級代號、班名或教師" className={`${field} pl-9`} />
+                  </span>
+                </label>
+                <label className="min-w-0 text-sm font-bold text-slate-800">篩選年級
+                  <select value={activeGrade} onChange={(event) => setGrade(event.target.value)} className={field}>
+                    <option value="">全部年級</option>
+                    {grades.map((item) => <option key={item} value={item}>{gradeLabel(config, item)}</option>)}
+                  </select>
+                </label>
+              </div>
+            )}
+            <div className="mt-3 flex min-h-8 flex-wrap items-center justify-between gap-1.5">
+              <p role="status" className="text-sm font-bold text-slate-600">顯示 {visible.length} / {classrooms.length} 間考場</p>
+              {hasFilters && <button type="button" onClick={clearFilters}
+                className="min-h-11 cursor-pointer rounded-lg px-2 text-sm font-bold text-violet-900 hover:bg-violet-50">清除篩選</button>}
+            </div>
+          </div>
+          {visible.length ? (
+            <>
+              <div aria-hidden="true" className={`hidden gap-3 border-y border-slate-200 bg-slate-50 px-4 py-2 text-xs font-bold text-slate-600 sm:grid ${listColumns}`}>
+                <span>考場</span><span>監考老師與指派來源</span><span className="text-right">操作</span>
+              </div>
+              <ul aria-label="監考指派清單" className="divide-y divide-slate-200 border-t border-slate-200 sm:border-t-0">
+                {visible.map((room) => {
+                  const teacher = teachersByRoom.get(room.classId);
+                  const action = teacher ? '更換老師' : '指派老師';
+                  return (
+                    <li key={room.classId} className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-3 hover:bg-slate-50 sm:px-4 ${listColumns}`}>
+                      <div className="flex min-w-0 items-center gap-2 [overflow-wrap:anywhere]">
+                        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-violet-50 text-violet-800"><DoorOpen size={16} aria-hidden="true" /></span>
+                        <div className="min-w-0">
+                          <strong className="block text-sm text-slate-950">{room.className}</strong>
+                          <p className="text-xs text-slate-600">{gradeLabel(config, room.grade)} · {room.classId}</p>
+                        </div>
+                      </div>
+                      <div className="col-start-1 row-start-2 min-w-0 [overflow-wrap:anywhere] sm:col-start-2 sm:row-start-1">
+                        {teacher ? <strong className="block text-sm text-slate-950">{teacher.name}</strong>
+                          : <span className="inline-block rounded-md bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-900">待指派</span>}
+                        <p className="mt-0.5 text-xs leading-5 text-slate-600">{assignmentSource(room, period, teacher)}</p>
+                      </div>
+                      <button type="button" onClick={() => openEditor(room)} aria-label={`${roomLabel(room.classId)} ${action}`}
+                        className={`${teacher ? secondary : primary} col-start-2 row-span-2 row-start-1 justify-self-end whitespace-nowrap sm:col-start-3 sm:row-span-1`}>
+                        {teacher ? <Pencil size={15} aria-hidden="true" /> : <UserPlus size={15} aria-hidden="true" />}{action}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          ) : <p className="border-t border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-700">
+            {classrooms.length ? status === 'pending' && assignedCount === classrooms.length ? '此範圍的考場都已指派。' : '找不到符合條件的考場，請調整篩選。'
+              : data.classrooms.length ? '這一節沒有適用的考場，請確認考程的適用範圍。' : '尚未設定考場班級。'}
+          </p>}
+        </section>
+      </div>
 
       {editor && (
         <dialog ref={dialog} aria-labelledby="assignment-editor-title"
           onCancel={(event) => { event.preventDefault(); if (!saving) closeEditor(); }}
           className="no-print fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/65">
           <div className="flex max-h-[calc(100dvh-2rem-2px)] flex-col">
-            <header className="shrink-0 border-b border-slate-200 px-4 py-4 sm:px-6">
+            <header className="view-header-banner shrink-0 px-4 py-4 sm:px-6">
               <h4 id="assignment-editor-title" className="text-lg font-black [overflow-wrap:anywhere]">{editor.teacherId ? '更換監考老師' : '指派監考老師'}</h4>
-              <p className="mt-1 text-sm font-bold text-teal-900 [overflow-wrap:anywhere]">{roomLabel(editor.classId)} · {editor.periodLabel}</p>
+              <p className="mt-1 text-sm font-bold text-violet-900 [overflow-wrap:anywhere]">{roomLabel(editor.classId)} · {editor.periodLabel}</p>
             </header>
             <div className="min-h-0 flex-auto space-y-4 overflow-y-auto overscroll-contain p-4 sm:px-6">
               {changedElsewhere && !saving ? <p role="alert" className="text-sm font-bold text-rose-800">考場、節次或指派已變更，請關閉後重新開啟。</p> : (
@@ -345,7 +382,7 @@ export function InvigilatorAssignments({ data, onManageTeachers, onOpenSchedule 
               )}
             </div>
             <footer className="shrink-0 space-y-2 border-t border-slate-200 px-4 py-3 sm:px-6">
-              {saving && <p role="status" className="text-sm font-bold text-teal-900">正在更新監考指派…</p>}
+              {saving && <p role="status" className="text-sm font-bold text-violet-900">正在更新監考指派…</p>}
               {error && <p role="alert" className="text-sm font-bold text-rose-800">{error}</p>}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 {currentTeacher && !changedElsewhere && <button type="button" disabled={saving} onClick={() => void saveAssignment(currentTeacher, true)}

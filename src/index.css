@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+@custom-variant admin-theme (&:where([data-header-tone="admin"] *));
 
 @layer base {
   :root {
@@ -108,6 +109,29 @@
     min-height: 0 !important;
   }
 
+}
+
+[data-header-tone="board"] {
+  --header-tint: #dff5ec;
+  --header-edge: #b8ded0;
+  --header-accent: #12594e;
+}
+
+[data-header-tone="teacher"] {
+  --header-tint: #e2f1ff;
+  --header-edge: #bdd9f2;
+  --header-accent: #1e4e7d;
+}
+
+[data-header-tone="admin"] {
+  --header-tint: #eee7fb;
+  --header-edge: #d8c9ef;
+  --header-accent: #563981;
+}
+
+.view-header-banner {
+  border-bottom: 1px solid var(--header-edge);
+  background: linear-gradient(112deg, #fafcfe, var(--header-tint));
 }
 
 .attendance-banner {

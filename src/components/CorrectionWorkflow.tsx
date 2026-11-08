@@ -6,7 +6,7 @@ import { gradeLabel } from '../types/grades';
 import { useActionConfirmation } from './useActionConfirmation';
 
 const field = 'mt-1 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950';
-const primary = 'min-h-11 cursor-pointer rounded-xl bg-teal-800 px-4 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50';
+const primary = 'min-h-11 cursor-pointer rounded-xl bg-teal-800 px-4 text-sm font-bold text-white hover:bg-teal-900 admin-theme:bg-violet-800 admin-theme:hover:bg-violet-900 disabled:opacity-50';
 const secondary = 'min-h-11 cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50';
 const panel = 'min-w-0 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6';
 const labels = { pending: '待教務審核', approved: '已核准', rejected: '已退回' };
@@ -182,18 +182,18 @@ export function CorrectionReview({ proposals, audienceLabel }: {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
         <div className="min-w-0">
           <h3 id="correction-review-title" className="flex items-center gap-2 text-lg font-black text-slate-950">
-            <FilePenLine size={20} className="shrink-0 text-teal-800" aria-hidden="true" />待審的試題更正
+            <FilePenLine size={20} className="shrink-0 text-violet-800" aria-hidden="true" />待審的試題更正
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">核對題號、內容與對象。核准後會立即發布。</p>
         </div>
         <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-950">{pending.length} 筆待審</span>
       </div>
-      {feedback && <p role={feedback.error ? 'alert' : 'status'} className={`mt-3 rounded-xl p-3 text-sm font-bold ${feedback.error ? 'bg-rose-50 text-rose-900' : 'bg-teal-50 text-teal-900'}`}>{feedback.text}</p>}
+      {feedback && <p role={feedback.error ? 'alert' : 'status'} className={`mt-3 rounded-xl p-3 text-sm font-bold ${feedback.error ? 'bg-rose-50 text-rose-900' : 'bg-emerald-50 text-emerald-900'}`}>{feedback.text}</p>}
       {pending.length ? (
         <ul className="mt-4 grid gap-3 xl:grid-cols-2">
           {pending.map((item) => (
             <li key={item.id} className="min-w-0 rounded-xl border border-slate-200 p-4">
-              <p className="mb-2 text-sm font-bold text-teal-900 [overflow-wrap:anywhere]">送審教師 · {item.teacherName}</p>
+              <p className="mb-2 text-sm font-bold text-violet-900 [overflow-wrap:anywhere]">送審教師 · {item.teacherName}</p>
               <CorrectionDetails item={item} audience={audienceLabel(item.targetAudience)} />
               {rejectId === item.id ? (
                 <form className="mt-3 space-y-2" onSubmit={(e) => { e.preventDefault(); void review(item, 'rejected'); }}>
@@ -225,7 +225,7 @@ export function CorrectionReview({ proposals, audienceLabel }: {
           <ul className="grid gap-3 pb-3 xl:grid-cols-2">
             {reviewed.map((item) => (
               <li key={item.id} className="rounded-xl border border-slate-200 p-3">
-                <p className="mb-1 text-xs font-bold text-teal-900 [overflow-wrap:anywhere]">送審教師 · {item.teacherName}</p>
+                <p className="mb-1 text-xs font-bold text-violet-900 [overflow-wrap:anywhere]">送審教師 · {item.teacherName}</p>
                 <CorrectionDetails item={item} audience={audienceLabel(item.targetAudience)} />
               </li>
             ))}

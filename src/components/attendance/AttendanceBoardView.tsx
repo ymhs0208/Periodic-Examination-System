@@ -1,7 +1,7 @@
 import { useServerClock } from '../useServerClock';
 import { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Clock3, LayoutGrid,
+  ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Clock3, LayoutGrid,
   Maximize2, Minimize2, UserRound, UsersRound
 } from 'lucide-react';
 import type { ClassroomExamState, SystemData } from '../../types/exam';
@@ -11,10 +11,10 @@ import { ExamPeriodSelect } from '../ExamPeriodSelect';
 
 interface AttendanceBoardViewProps {
   data: SystemData;
-  initialMode?: 'school' | 'classroom';
+  mode: 'school' | 'classroom';
   selectedClassroom: ClassroomExamState;
   onSelectClassroom: (classId: string) => void;
-  onChooseClassroom: () => void;
+  onShowSchool: () => void;
 }
 
 const control = 'inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700';
@@ -56,14 +56,15 @@ function ReportStatus({ reported }: { reported: boolean }) {
   );
 }
 
-export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom, onChooseClassroom, initialMode = 'classroom' }: AttendanceBoardViewProps) {
-  const [mode, setMode] = useState<'school' | 'classroom'>(initialMode);
+export function AttendanceBoardView({ data, mode, selectedClassroom, onSelectClassroom, onShowSchool }: AttendanceBoardViewProps) {
+  const [lastClassroomId, setLastClassroomId] = useState(selectedClassroom.classId);
   const [requestedPeriodId, setRequestedPeriodId] = useState('');
   const [selectedGradeFilter, setGradeFilter] = useState('all');
   const currentTime = useServerClock(1000);
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenError, setFullscreenError] = useState(false);
   const boardRef = useRef<HTMLDivElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const allPeriods = examPeriods(data.config);
   const periods = mode === 'school' ? allPeriods : allPeriods.filter((period) => periodApplies(period, selectedClassroom) || !!selectedClassroom.periodAttendance?.[period.id]);
   const chosenPeriod = periods.find((period) => period.id === requestedPeriodId);
@@ -91,6 +92,11 @@ export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom
     };
   }, []);
 
+  useEffect(() => {
+    if (mode === 'classroom') setLastClassroomId(selectedClassroom.classId);
+    if (document.fullscreenElement === boardRef.current) boardRef.current?.scrollTo(0, 0);
+  }, [mode, selectedClassroom.classId]);
+
   async function toggleFullscreen() {
     try {
       if (document.fullscreenElement === boardRef.current) {
@@ -112,17 +118,16 @@ export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom
   return (
     <div ref={boardRef} className={fullscreen ? 'overflow-auto bg-[#f4f6fb] p-3 sm:p-6' : 'w-full'}>
       <div className="mx-auto w-full max-w-[1440px] space-y-4 pb-5 sm:space-y-5">
-        <section className="attendance-banner relative isolate overflow-hidden rounded-3xl p-4 text-white sm:p-6 lg:p-8">
-          <div className="attendance-banner-pattern pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3" aria-hidden="true" />
+        <section className="view-header-banner rounded-3xl border border-(--header-edge) p-4 text-slate-950 sm:p-6 lg:p-8">
           <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
             <div className="min-w-0 flex-1 basis-52">
-              <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-teal-200">
+              <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-(--header-accent)">
                 <LayoutGrid size={16} aria-hidden="true" />考場出席即時看板
               </p>
-              <h1 className="mt-2.5 break-words text-3xl font-black tracking-tight sm:text-4xl">
+              <h1 ref={heading} tabIndex={-1} className="mt-2.5 scroll-mt-24 break-words text-3xl font-black tracking-tight sm:text-4xl">
                 {mode === 'school' ? '全校考場總覽' : classroom.className}
               </h1>
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-200">
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-700">
                 {mode === 'classroom' && <span>{gradeLabel(config, classroom.grade)} · {classroom.classId}</span>}
                 {(config.examName || config.schoolName) && <span>{config.examName || config.schoolName}</span>}
                 {examDetails.length > 0 && (
@@ -130,41 +135,33 @@ export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom
                 )}
               </div>
             </div>
-            <time className="flex items-center gap-2 rounded-xl border border-white/20 bg-slate-950/30 px-3 py-2 font-mono text-sm font-bold tabular-nums">
-              <Clock3 size={16} className="text-teal-200" aria-hidden="true" />
+            <time className="flex items-center gap-2 rounded-xl border border-(--header-edge) bg-white/80 px-3 py-2 font-mono text-sm font-bold tabular-nums">
+              <Clock3 size={16} className="text-(--header-accent)" aria-hidden="true" />
               {timeFormat.format(currentTime)}
             </time>
           </div>
         </section>
 
-        <div className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap">
-          {mode === 'classroom' && <button type="button" className={control} onClick={async () => {
-            if (document.fullscreenElement === boardRef.current) await document.exitFullscreen().catch(() => {});
-            setMode('school');
-            setFullscreenError(false);
-            onChooseClassroom();
-          }}>
-            <ArrowLeft size={16} aria-hidden="true" />返回全校總覽
-          </button>}
-          {(['classroom', 'school'] as const).map((item) => (
-            <button
-              type="button"
-              key={item}
-              aria-pressed={mode === item}
-              onClick={async () => {
-                if (item === 'school' && document.fullscreenElement === boardRef.current) {
-                  await document.exitFullscreen().catch(() => {});
-                }
-                setFullscreenError(false);
-                setMode(item);
-              }}
-              className={`${control} aria-pressed:border-teal-700 aria-pressed:bg-teal-50 aria-pressed:text-teal-900`}
-            >
-              {item === 'classroom' ? '單班出席' : '全校總覽'}
-            </button>
-          ))}
-          {mode === 'classroom' && document.fullscreenEnabled && (
-            <button type="button" className={`${control} sm:ml-auto`} onClick={toggleFullscreen}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div role="group" aria-label="出席看板檢視方式" className="grid grid-cols-2 gap-1 rounded-2xl border border-slate-200 bg-white p-1">
+            {(['classroom', 'school'] as const).map((item) => (
+              <button
+                type="button"
+                key={item}
+                aria-pressed={mode === item}
+                onClick={() => {
+                  if (item === mode) return;
+                  if (item === 'school') onShowSchool();
+                  else onSelectClassroom(data.classrooms.find((room) => room.classId === lastClassroomId)?.classId ?? selectedClassroom.classId);
+                }}
+                className={`${control} whitespace-nowrap border-transparent aria-pressed:border-teal-200 aria-pressed:bg-teal-50 aria-pressed:text-teal-900`}
+              >
+                {item === 'classroom' ? '單班出席' : '全校總覽'}
+              </button>
+            ))}
+          </div>
+          {document.fullscreenEnabled && (
+            <button type="button" className={`${control} ml-auto`} onClick={toggleFullscreen}>
               {fullscreen ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}
               {fullscreen ? '退出全螢幕' : '全螢幕'}
             </button>
@@ -241,7 +238,7 @@ export function AttendanceBoardView({ data, selectedClassroom, onSelectClassroom
                   <li key={room.classId}>
                     <button type="button" className="flex h-full w-full cursor-pointer flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left hover:border-teal-600 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700" onClick={() => {
                       onSelectClassroom(room.classId);
-                      setMode('classroom');
+                      heading.current?.focus();
                     }}>
                       <span className="flex w-full flex-wrap items-center justify-between gap-2">
                         <span className="break-words font-bold">{room.className} <span className="font-mono text-xs text-slate-600">{room.classId}</span></span>

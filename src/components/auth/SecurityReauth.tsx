@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ShieldCheck } from 'lucide-react';
 import { setReauthenticationHandler } from '../../services/examSync';
 
 // Credentials stay in component memory only and are cleared on completion/cancel.
@@ -8,6 +9,7 @@ export function SecurityReauth() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
+  const passwordInput = useRef<HTMLInputElement>(null);
   const resolve = useRef<((ok: boolean) => void) | null>(null);
   const finish = (ok: boolean) => {
     setPassword(''); setError(''); setOpen(false); dialog.current?.close();
@@ -22,7 +24,12 @@ export function SecurityReauth() {
     });
     return () => { setReauthenticationHandler(null); resolve.current?.(false); };
   }, []);
-  useEffect(() => { if (open && !dialog.current?.open) dialog.current?.showModal(); }, [open]);
+  useEffect(() => {
+    if (open && dialog.current && !dialog.current.open) {
+      dialog.current.showModal();
+      passwordInput.current?.focus({ preventScroll: true });
+    }
+  }, [open]);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); if (busy) return;
     setBusy(true); setError('');
@@ -35,15 +42,31 @@ export function SecurityReauth() {
     } catch { setPassword(''); setError('無法完成驗證，請檢查網路後再試'); }
     finally { setBusy(false); }
   };
-  return <dialog ref={dialog} aria-labelledby="reauth-title" onCancel={event => { event.preventDefault(); if (!busy) finish(false); }} className="rounded-2xl p-6 w-[min(95vw,420px)] backdrop:bg-black/40">
-    <form onSubmit={submit} className="flex flex-col gap-4">
-      <h2 id="reauth-title" className="text-lg font-bold">確認管理員身分</h2>
-      <p className="text-sm">此操作需要最近 5 分鐘內的管理員驗證。驗證成功後會繼續原操作。</p>
-      <label className="text-sm font-bold">目前管理員密碼
-        <input autoFocus type="password" autoComplete="current-password" required maxLength={256} value={password} onChange={e => setPassword(e.target.value)} disabled={busy} className="block w-full border rounded-lg p-2 mt-1" />
-      </label>
-      {error && <p role="alert" className="text-red-700">{error}</p>}
-      <div className="flex gap-3 justify-end"><button type="button" disabled={busy} onClick={() => finish(false)}>取消</button><button type="submit" disabled={busy} className="bg-blue-700 text-white rounded-lg px-4 py-2">{busy ? '驗證中…' : '驗證並繼續'}</button></div>
+  return <dialog ref={dialog} aria-labelledby="reauth-title" aria-describedby="reauth-description"
+    onCancel={(event) => { event.preventDefault(); if (!busy) finish(false); }}
+    className="no-print fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/65">
+    <form onSubmit={submit} className="flex max-h-[calc(100dvh-2rem-2px)] flex-col">
+      <header className="flex shrink-0 items-start gap-3 border-b border-slate-200 bg-teal-50 p-4 admin-theme:bg-violet-50 sm:px-6">
+        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white text-teal-800 admin-theme:text-violet-800"><ShieldCheck size={20} aria-hidden="true" /></span>
+        <div className="min-w-0">
+          <h2 id="reauth-title" className="text-lg font-black">確認管理員身分</h2>
+          <p id="reauth-description" className="mt-1 text-sm leading-6 text-slate-700">此操作需要最近 5 分鐘內的管理員驗證。驗證成功後會繼續原操作。</p>
+        </div>
+      </header>
+      <div className="min-h-0 space-y-3 overflow-y-auto p-4 sm:px-6">
+        <label className="block text-sm font-bold text-slate-800">目前管理員密碼
+          <input ref={passwordInput} type="password" autoComplete="current-password" required maxLength={256}
+            value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy}
+            className="mt-1.5 block min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-base" />
+        </label>
+        {error && <p role="alert" className="rounded-lg bg-rose-50 p-2.5 text-sm font-bold text-rose-900">{error}</p>}
+      </div>
+      <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 p-4 sm:px-6">
+        <button type="button" disabled={busy} onClick={() => finish(false)}
+          className="min-h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-800 hover:bg-slate-100 disabled:opacity-50">取消</button>
+        <button type="submit" disabled={busy}
+          className="min-h-11 rounded-xl bg-teal-800 px-4 text-sm font-bold text-white hover:bg-teal-900 admin-theme:bg-violet-800 admin-theme:hover:bg-violet-900 disabled:opacity-50">{busy ? '驗證中…' : '驗證並繼續'}</button>
+      </footer>
     </form>
   </dialog>;
 }

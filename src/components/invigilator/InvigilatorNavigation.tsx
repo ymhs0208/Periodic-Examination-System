@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Bell, CalendarDays, ChevronDown, ChevronRight, ClipboardCheck, FilePenLine, GraduationCap, Send } from 'lucide-react';
+import { Bell, CalendarDays, ChevronDown, ClipboardCheck, FilePenLine, GraduationCap, Send } from 'lucide-react';
 import './workbench.css';
 
 const pages = {
@@ -39,12 +39,12 @@ export function InvigilatorNavigation({ active, classId, showAssignments, showCo
 
   function closeMenu() {
     setOpen(false);
-    trigger.current?.focus();
+    if (trigger.current?.offsetParent) trigger.current.focus();
   }
 
   return (
     <nav aria-label="教師工作台頁面" className="wb-nav" onKeyDown={(event) => {
-      if (open && event.key === 'Escape') {
+      if (open && event.key === 'Escape' && trigger.current?.offsetParent) {
         event.preventDefault();
         closeMenu();
       }
@@ -57,21 +57,22 @@ export function InvigilatorNavigation({ active, classId, showAssignments, showCo
         </div>
       </div>
       <button ref={trigger} type="button" aria-expanded={open} aria-controls={linksId}
-        onClick={() => setOpen(!open)} className="wb-nav-toggle">
-        <span className="min-w-0 flex-1">
-          <span className="block text-xs font-bold text-teal-800">{open ? '收合功能選單' : '展開功能選單'}</span>
-          <span className="mt-0.5 block text-sm font-black">{invigilatorTitle(active)}</span>
+        onClick={() => setOpen((expanded) => !expanded)} className="wb-nav-toggle">
+        <span className="min-w-0">
+          <span className="block text-sm font-bold">目前在 {invigilatorTitle(active)}</span>
+          {activeStatus && <span className="wb-link-status"><span className="wb-button-status" data-tone={active === 'announcements' ? undefined : 'warning'}>{activeStatus}</span></span>}
         </span>
-        {activeStatus && <span className="wb-button-status" data-tone={active === 'announcements' ? undefined : 'warning'}>{activeStatus}</span>}
-        <ChevronDown size={18} className="wb-nav-chevron" aria-hidden="true" />
+        <span className="inline-flex shrink-0 items-center gap-1 text-xs font-bold">
+          {open ? '收合選單' : '切換功能'}<ChevronDown size={16} className="wb-nav-chevron" aria-hidden="true" />
+        </span>
       </button>
-      <div id={linksId} hidden={!open} className="wb-links">
+      <div id={linksId} data-open={open} className="wb-links">
         {tabs.filter((tab) => (tab !== 'assignments' || showAssignments) && (tab !== 'corrections' || showCorrections)).map((tab) => {
           const { title, short, icon: Icon } = pages[tab];
           return (
             <a key={tab} href={invigilatorPath(tab, classId)} aria-current={active === tab ? 'page' : undefined}
               onClick={(event) => {
-                if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
                 event.preventDefault();
                 closeMenu();
                 onNavigate(tab);
@@ -84,7 +85,6 @@ export function InvigilatorNavigation({ active, classId, showAssignments, showCo
                   <span className="wb-link-status"><span className="wb-button-status" data-tone={tab === 'announcements' ? undefined : 'warning'}>{status[tab]}</span></span>
                 ) : <span className="wb-link-hint">{short}</span>}
               </span>
-              <ChevronRight size={16} className="wb-link-arrow" aria-hidden="true" />
             </a>
           );
         })}

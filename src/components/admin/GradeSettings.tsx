@@ -44,7 +44,7 @@ export function GradeSettings({ data }: { data: SystemData }) {
   }
 
   return (
-    <section className="min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:col-span-12" aria-labelledby="grade-settings-heading">
+    <section className="min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6" aria-labelledby="grade-settings-heading">
       <div>
         <h3 id="grade-settings-heading" className="text-base font-black text-slate-900 sm:text-lg">年級管理</h3>
         <p className="mt-1 text-sm leading-6 text-slate-600">新增年級代碼與顯示名稱，例如代碼 10、名稱「高中一年級」。改名後，選班、公告對象與報表會同步更新。</p>
@@ -64,14 +64,14 @@ export function GradeSettings({ data }: { data: SystemData }) {
         </label>
         <div className="flex flex-wrap gap-2">
           <button type="submit" disabled={saving}
-            className="min-h-11 cursor-pointer rounded-xl bg-teal-800 px-4 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50">
+            className="min-h-11 cursor-pointer rounded-xl bg-violet-800 px-4 text-sm font-bold text-white hover:bg-violet-900 disabled:opacity-50">
             {editing === null ? '新增年級' : '儲存名稱'}
           </button>
           {editing !== null && <button type="button" disabled={saving} onClick={resetForm}
             className="min-h-11 cursor-pointer rounded-xl border border-slate-300 px-3 text-sm font-bold">取消</button>}
         </div>
       </form>
-      {feedback && <p role={feedback.success ? 'status' : 'alert'} className={feedback.success ? 'text-sm text-teal-800' : 'text-sm text-rose-800'}>{feedback.message}</p>}
+      {feedback && <p role={feedback.success ? 'status' : 'alert'} className={feedback.success ? 'text-sm text-violet-800' : 'text-sm text-rose-800'}>{feedback.message}</p>}
       {grades.length === 0 && <p className="text-sm text-slate-600">目前沒有年級，請先新增再建立考場。</p>}
       <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {grades.map((grade) => {
@@ -88,7 +88,7 @@ export function GradeSettings({ data }: { data: SystemData }) {
                 setCode(String(grade));
                 setLabel(name);
                 setFeedback(null);
-              }} className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-lg text-teal-800 hover:bg-teal-100">
+              }} className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-lg text-violet-800 hover:bg-violet-100">
                 <Pencil size={16} aria-hidden="true" />
               </button>
               <button type="button" aria-label={`移除 ${name}`} title={inUse ? '此年級已有考場、定向公告或考程' : '移除年級'}

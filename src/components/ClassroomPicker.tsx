@@ -16,27 +16,26 @@ export function ClassroomPicker({ board, classrooms, config, onSelectClassroom }
 
   return (
     <div className={`mx-auto w-full max-w-6xl space-y-5 pb-6${isBlackboard ? ' blackboard-picker' : ''}`}>
-      <section className="attendance-banner relative isolate overflow-hidden rounded-3xl px-5 py-7 text-white sm:px-9 sm:py-10 lg:px-12 lg:py-12">
-        <div className="attendance-banner-pattern pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3" aria-hidden="true" />
+      <section className="view-header-banner rounded-3xl border border-(--header-edge) px-5 py-7 text-slate-950 sm:px-9 sm:py-10 lg:px-12 lg:py-12">
         <div className="grid items-center gap-7 lg:grid-cols-[1fr_auto]">
           <div>
-            <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-teal-200">
+            <p className="flex items-center gap-2 text-xs font-bold tracking-widest text-(--header-accent)">
               <Icon size={16} aria-hidden="true" />
               {isBlackboard ? '教室電子黑板' : '考場出席即時看板'}
             </p>
             <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{isBlackboard ? '選擇要顯示的班級' : '選擇班級'}</h1>
-            <p className="mt-3 text-sm leading-7 text-slate-200 sm:text-base">
+            <p className="mt-3 text-sm leading-7 text-slate-700 sm:text-base">
               {isBlackboard ? '點選班級，開啟考試時間、出席與教務公告。進入後可切換全螢幕投影。' : '選擇班級後，即可查看該班的出席統計與缺席明細。'}
             </p>
           </div>
-          <dl className="grid w-full max-w-sm gap-3 rounded-2xl border border-white/20 bg-slate-950/30 p-4 text-sm lg:min-w-60">
+          <dl className="grid w-full max-w-sm gap-3 rounded-2xl border border-(--header-edge) bg-white/80 p-4 text-sm lg:min-w-60">
             <div className="flex items-center justify-between gap-4">
-              <dt className="flex shrink-0 items-center gap-2 text-slate-200"><Building2 size={16} aria-hidden="true" />考場</dt>
+              <dt className="flex shrink-0 items-center gap-2 text-slate-700"><Building2 size={16} aria-hidden="true" />考場</dt>
               <dd className="font-bold"><span className="font-mono text-lg">{classrooms.length}</span> 班</dd>
             </div>
             {config.examDate && (
-              <div className="flex items-center justify-between gap-4 border-t border-white/15 pt-3">
-                <dt className="flex shrink-0 items-center gap-2 text-slate-200"><CalendarDays size={16} aria-hidden="true" />考試日期</dt>
+              <div className="flex items-center justify-between gap-4 border-t border-(--header-edge) pt-3">
+                <dt className="flex shrink-0 items-center gap-2 text-slate-700"><CalendarDays size={16} aria-hidden="true" />考試日期</dt>
                 <dd className="font-mono font-bold">{config.examDate}</dd>
               </div>
             )}

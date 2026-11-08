@@ -79,7 +79,7 @@ export function ExamCsvImport({ kind, disabled = false }: { kind: ExamImportKind
         }}><Upload size={16} aria-hidden="true" />匯入 CSV</button>
         <button type="button" className={secondary} onClick={download}><Download size={16} aria-hidden="true" />下載 CSV 範本</button>
       </div>
-      {notice && <p role="status" className="mt-2 text-sm font-bold text-teal-800">{notice}</p>}
+      {notice && <p role="status" className="mt-2 text-sm font-bold text-violet-800">{notice}</p>}
       <dialog ref={dialog} aria-labelledby={`csv-${kind}-title`}
         onCancel={(event) => { if (busy) event.preventDefault(); }}
         onClose={() => { setFile(undefined); setPreview(undefined); setError(''); }}
@@ -104,13 +104,13 @@ export function ExamCsvImport({ kind, disabled = false }: { kind: ExamImportKind
             {error && <p role="alert" className="rounded-lg bg-rose-50 p-2.5 text-sm font-bold text-rose-900">{error}</p>}
             {error && file && !busy && <button type="button" className={secondary} onClick={() => void run(file)}>重新預覽</button>}
             {preview && <>
-              <p role="status" className="text-sm font-bold text-teal-900">
+              <p role="status" className="text-sm font-bold text-violet-900">
                 預覽 {preview.rows.length} 筆 · 將匯入 {changed} 筆 · 略過 {preview.rows.length - changed} 筆
               </p>
               <ul aria-label="CSV 匯入預覽" className="divide-y divide-slate-200 rounded-xl border border-slate-200">
                 {preview.rows.map(({ line, action, summary }) => (
                   <li key={line} className="flex items-start gap-2 p-2.5 text-sm">
-                    <span className="shrink-0 text-xs font-bold text-teal-900">第 {line} 列 · {action}</span>
+                    <span className="shrink-0 text-xs font-bold text-violet-900">第 {line} 列 · {action}</span>
                     <span className="min-w-0 [overflow-wrap:anywhere]">{summary}</span>
                   </li>
                 ))}
@@ -120,7 +120,7 @@ export function ExamCsvImport({ kind, disabled = false }: { kind: ExamImportKind
           <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 p-4 sm:px-6">
             <button type="button" className={secondary} disabled={busy} onClick={() => dialog.current?.close()}>關閉</button>
             <button type="button" disabled={busy || !file || !preview || !changed}
-              className="min-h-11 rounded-xl bg-teal-800 px-4 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50"
+              className="min-h-11 rounded-xl bg-violet-800 px-4 text-sm font-bold text-white hover:bg-violet-900 disabled:opacity-50"
               onClick={() => { if (file && preview) void run(file, preview.version); }}>確認匯入</button>
           </footer>
         </div>

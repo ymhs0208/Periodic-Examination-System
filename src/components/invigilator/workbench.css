@@ -15,53 +15,53 @@
 }
 
 .wb-nav { padding: .75rem; }
-.wb-identity { display: flex; align-items: center; gap: .65rem; padding: .2rem .2rem .75rem; }
-.wb-mark, .wb-link-icon {
+.wb-identity { display: flex; align-items: center; gap: .65rem; border-bottom: 1px solid #e4ebef; margin-bottom: .5rem; padding: .2rem .2rem .65rem; }
+.wb-mark {
   display: grid;
   flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
   place-items: center;
   border-radius: .7rem;
-  background: #e7f4f1;
-  color: #0f665b;
+  background: var(--header-tint);
+  color: var(--header-accent);
 }
-.wb-mark { width: 2.5rem; height: 2.5rem; }
-.wb-link-icon { width: 2rem; height: 2rem; }
 .wb-nav-toggle {
   display: flex;
   width: 100%;
-  min-height: 3.25rem;
+  min-height: 2.75rem;
   align-items: center;
+  justify-content: space-between;
   gap: .5rem;
-  border: 1px solid #bad9d3;
-  border-radius: .85rem;
-  padding: .45rem .65rem;
-  background: #eef8f5;
-  color: #183647;
+  border-radius: .5rem;
+  padding: .45rem .625rem;
+  background: #eff7ff;
+  color: var(--header-accent);
   cursor: pointer;
   text-align: left;
 }
-.wb-nav-toggle:hover, .wb-nav-toggle[aria-expanded="true"] { background: #e1f3ed; }
-.wb-nav-chevron { flex: none; color: #126359; }
+.wb-nav-toggle:hover, .wb-nav-toggle[aria-expanded="true"] { background: var(--header-tint); }
 .wb-nav-toggle[aria-expanded="true"] .wb-nav-chevron { transform: rotate(180deg); }
-.wb-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .375rem; margin-top: .5rem; }
-.wb-links[hidden] { display: none; }
+.wb-nav :is(button, a):focus-visible { outline: 2px solid var(--header-accent); outline-offset: 2px; }
+.wb-links { display: none; gap: .25rem; margin-top: .5rem; }
+.wb-links[data-open="true"] { display: grid; }
 .wb-link {
   display: flex;
   min-width: 0;
-  min-height: 3rem;
+  min-height: 2.75rem;
   align-items: center;
-  gap: .45rem;
-  border: 1px solid #e4ebef;
-  border-radius: .85rem;
-  padding: .35rem;
-  color: #243647;
+  gap: .5rem;
+  border: 1px solid transparent;
+  border-radius: .5rem;
+  padding: .375rem .625rem;
+  color: #334155;
   font-size: .875rem;
   line-height: 1.3;
 }
-.wb-link:hover { background: #f1f8f7; }
-.wb-link[aria-current="page"] { border-color: #7ab6aa; background: #e1f3ed; color: #0c544b; }
-.wb-link[aria-current="page"] .wb-link-icon { background: #14675c; color: #fff; }
-.wb-link-hint, .wb-link-arrow { display: none; }
+.wb-link:hover { background: #eff7ff; }
+.wb-link[aria-current="page"] { border-color: var(--header-edge); background: #eff7ff; color: var(--header-accent); }
+.wb-link-icon { display: grid; flex: none; place-items: center; color: var(--header-accent); }
+.wb-link-hint { display: none; }
 .wb-button-status {
   display: inline-block;
   flex: none;
@@ -81,16 +81,13 @@
 
 .wb-hero {
   min-width: 0;
-  border: 1px solid #cde2e2;
+  border: 1px solid var(--header-edge);
   border-radius: 1.4rem;
   padding: clamp(1rem, 3vw, 2rem);
-  background:
-    radial-gradient(ellipse at 100% 0%, #d8f1eb, transparent 68%),
-    linear-gradient(120deg, #f6fdfb, #edf5fc);
 }
 .wb-hero-top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem; }
 .wb-hero-actions { min-width: 0; width: 100%; }
-.wb-eyebrow { display: flex; align-items: center; gap: .45rem; color: #126359; font-size: .8125rem; font-weight: 800; }
+.wb-eyebrow { display: flex; align-items: center; gap: .45rem; color: var(--header-accent); font-size: .8125rem; font-weight: 800; }
 .wb-context { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; margin-top: 1rem; }
 .wb-panel { padding: clamp(1rem, 2.5vw, 1.5rem); }
 .wb-split { display: grid; align-items: start; gap: 1rem; }
@@ -111,20 +108,20 @@
 .teacher-workbench :is(select, input, textarea) { font-size: 1rem; }
 
 @media (min-width: 42rem) {
-  .wb-links { display: flex; flex-wrap: wrap; }
-  .wb-link { padding-inline: .55rem; }
   .wb-hero-actions { width: auto; max-width: 100%; }
   .wb-context { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); }
+}
+
+@media (min-width: 40rem) and (max-width: 63.999rem) {
+  .wb-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (min-width: 64rem) {
   .teacher-workbench { grid-template-columns: 14rem minmax(0, 1fr); gap: 1.25rem; }
   .wb-nav { position: sticky; top: 5.75rem; }
-  .wb-identity { border-bottom: 1px solid #e4ebef; margin-bottom: .6rem; }
-  .wb-links { display: grid; grid-template-columns: minmax(0, 1fr); }
-  .wb-link { padding: .55rem; border-color: transparent; }
+  .wb-nav-toggle { display: none; }
+  .wb-links { display: grid; margin-top: 0; }
   .wb-link-hint { display: block; margin-top: .15rem; color: #485e70; font-size: .75rem; }
-  .wb-link-arrow { display: block; flex: none; }
 }
 
 @media (min-width: 74rem) {

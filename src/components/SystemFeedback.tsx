@@ -55,7 +55,7 @@ export function RequestActivity() {
   }, [pending]);
 
   return (
-    <div role="status" className="pointer-events-none fixed inset-x-3 bottom-3 z-50 flex justify-end sm:bottom-5 sm:right-5">
+    <div role="status" className="no-print pointer-events-none fixed inset-x-3 bottom-3 z-50 flex justify-end sm:bottom-5 sm:right-5">
       {pending && visible && <div className="flex items-center gap-2 rounded-xl border border-teal-200 bg-white px-3.5 py-2.5 text-sm font-bold text-teal-950 shadow-lg">
         <LoaderCircle size={18} aria-hidden="true" className="shrink-0 motion-safe:animate-spin" />
         {requests.every(Boolean) ? '正在讀取資料…' : '正在處理操作，等候系統回覆…'}

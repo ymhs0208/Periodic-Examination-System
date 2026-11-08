@@ -173,12 +173,12 @@ export function ClassroomSettings({ data, onManageInvigilation }: { data: System
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 ref={heading} id="classroom-settings-title" tabIndex={-1} className="flex items-center gap-2 text-lg font-black text-slate-950">
-            <Building2 size={20} className="text-teal-800" aria-hidden="true" />考場班級與應到人數設定
+            <Building2 size={20} className="text-violet-800" aria-hidden="true" />考場班級與應到人數設定
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-700">查看已設定的班級代號、班名與應到人數。選擇班級旁的「編輯」即可修改，或按「刪除」移除該班。</p>
         </div>
         <button type="button" disabled={!grades.length} onClick={() => openEditor()}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-teal-800 px-3.5 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50">
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-violet-800 px-3.5 text-sm font-bold text-white hover:bg-violet-900 disabled:opacity-50">
           <Plus size={17} aria-hidden="true" />新增考場班級
         </button>
       </div>
@@ -186,11 +186,11 @@ export function ClassroomSettings({ data, onManageInvigilation }: { data: System
         <ExamCsvImport kind="classrooms" disabled={editing} />
         <button type="button" className={secondary} onClick={onManageInvigilation}><UserCheck size={16} aria-hidden="true" />前往監考排班</button>
       </div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-950">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950">
         <strong>{rooms.length ? `已設定 ${rooms.length} 班` : '尚未設定考場班級'}</strong>
         {rooms.length > 0 && <span>全校應到共 <strong className="tabular-nums">{rooms.reduce((total, room) => total + room.expectedCount, 0)}</strong> 人</span>}
       </div>
-      {notice && <p role="status" className="text-sm font-bold text-teal-800">{notice}</p>}
+      {notice && <p role="status" className="text-sm font-bold text-violet-800">{notice}</p>}
       {rooms.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-700">
           {grades.length ? '可點「新增考場班級」建立第一班，或用 CSV 一次匯入多班。' : '請先在「年級管理」新增年級，再建立考場班級。'}
@@ -274,11 +274,11 @@ export function ClassroomSettings({ data, onManageInvigilation }: { data: System
             <footer className="shrink-0 space-y-2 border-t border-slate-200 px-4 py-3 sm:px-6">
               {changedElsewhere && <p role="alert" className="text-sm font-bold text-rose-800">此班級已更新，請關閉彈窗後重新開啟。</p>}
               {error && <p role="alert" className="text-sm font-bold text-rose-800">{error}</p>}
-              {saving && <p role="status" className="text-sm font-bold text-teal-800">正在儲存考場班級…</p>}
+              {saving && <p role="status" className="text-sm font-bold text-violet-800">正在儲存考場班級…</p>}
               <div className="flex flex-wrap justify-end gap-2">
                 <button type="button" className={secondary} disabled={saving} onClick={closeEditor}>取消</button>
                 <button type="submit" disabled={saving || !changed || changedElsewhere}
-                  className="min-h-11 rounded-xl bg-teal-800 px-4 text-sm font-bold text-white hover:bg-teal-900 disabled:opacity-50">儲存班級</button>
+                  className="min-h-11 rounded-xl bg-violet-800 px-4 text-sm font-bold text-white hover:bg-violet-900 disabled:opacity-50">儲存班級</button>
               </div>
             </footer>
           </form>
