@@ -34,6 +34,8 @@ class ExamSyncService {
   private audioCtx: AudioContext | null = null;
   private soundEnabled = true;
   private requestId = 0;
+  private sessionGeneration = 0;
+  private sessionScope?: string;
 
   public setSoundEnabled(enabled: boolean) {
     this.soundEnabled = enabled;
@@ -116,6 +118,11 @@ class ExamSyncService {
   }
 
   public reconnect() {
+    this.disconnectWebSocket();
+    this.connectWebSocket('reconnecting');
+  }
+
+  private disconnectWebSocket() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     if (this.ws) {
@@ -125,7 +132,15 @@ class ExamSyncService {
       this.ws.close();
       this.ws = null;
     }
-    this.connectWebSocket('reconnecting');
+  }
+
+  private recordSession(session: ExamSession | null, credentialsChanged = false) {
+    const scope = JSON.stringify(session);
+    if (credentialsChanged || (this.sessionScope !== undefined && scope !== this.sessionScope)) {
+      this.sessionGeneration++;
+    }
+    this.sessionScope = scope;
+    if (credentialsChanged) this.disconnectWebSocket();
   }
 
   private connectWebSocket(status: 'connecting' | 'reconnecting') {
@@ -155,9 +170,11 @@ class ExamSyncService {
       };
 
       socket.onmessage = (event) => {
+        if (this.ws !== socket) return;
         try {
           const { event: evType, payload, session } = JSON.parse(event.data);
           if (evType) {
+            if (evType === 'INIT_STATE') this.recordSession(session ?? null);
             this.notifySubscribers(evType, payload);
             if (evType === 'INIT_STATE') {
               this.reconnectAttempts = 0;
@@ -200,6 +217,10 @@ class ExamSyncService {
   }
 
   private async request<T>(path: string, options: RequestInit = {}, retried = false): Promise<ApiReply<T>> {
+    const generation = this.sessionGeneration;
+    const changesCredentials = path === '/api/auth/login' || path === '/api/auth/logout';
+    const sessionChanged = () => !changesCredentials && generation !== this.sessionGeneration;
+    const sessionChangedError = { success: false, error: '登入狀態已變更，請重新操作' };
     const method = options.method ?? 'GET';
     const tracked = path !== '/api/exam/state' && path !== '/api/auth/session' && !path.endsWith('/read');
     const id = ++this.requestId;
@@ -216,20 +237,28 @@ class ExamSyncService {
     try {
       const sentAt = Date.now();
       const response = await fetch(path, { ...options, signal: controller.signal });
+      if (sessionChanged()) return sessionChangedError;
       recordServerTime(Number(response.headers.get('X-Server-Time')), sentAt, Date.now());
       if (response.status === 428 && !retried && reauthenticationHandler) {
         window.clearTimeout(timeout);
         const verified = await reauthenticationHandler();
+        if (sessionChanged()) return sessionChangedError;
         if (!verified) return { success: false, error: '已取消身分驗證；原操作尚未執行' };
         if (options.signal?.aborted) return { success: false, error: '原操作已取消，請重新操作' };
         return this.request<T>(path, options, true);
       }
       const result = await response.json() as ApiReply<T>;
+      if (sessionChanged()) return sessionChangedError;
       if (typeof result?.success !== 'boolean') throw new Error('Invalid API response');
       if (response.ok && result.success && method !== 'GET' && path.startsWith('/api/exam/') && !path.endsWith('/read')) {
-        try { this.notifySubscribers('INIT_STATE', await this.fetchState()); }
-        catch { this.notifySubscribers('LIVE_CONNECTION', navigator.onLine ? 'reconnecting' : 'offline'); }
+        try {
+          const state = await this.fetchState();
+          if (!sessionChanged()) this.notifySubscribers('INIT_STATE', state);
+        } catch {
+          if (!sessionChanged()) this.notifySubscribers('LIVE_CONNECTION', navigator.onLine ? 'reconnecting' : 'offline');
+        }
       }
+      if (sessionChanged()) return sessionChangedError;
       return response.ok ? result : { success: false, error: result.error };
     } catch (error) {
       if (options.signal?.aborted) throw error;
@@ -257,7 +286,9 @@ class ExamSyncService {
   }
 
   public async fetchSession(signal?: AbortSignal): Promise<ExamSession | null> {
-    return this.readData(await this.request('/api/auth/session', { signal, cache: 'no-store' }));
+    const session = this.readData<ExamSession | null>(await this.request('/api/auth/session', { signal, cache: 'no-store' }));
+    if (this.sessionScope === undefined) this.recordSession(session);
+    return session;
   }
 
   public async updateAttendance(data: {
@@ -296,7 +327,7 @@ class ExamSyncService {
 
   public async updateIssue(
     id: string,
-    updates: { status?: string; reply?: string; repliedBy?: string }
+    updates: { expectedRevision: string | null; status?: string; reply?: string; repliedBy?: string }
   ): Promise<ExamIssue> {
     const res = await this.request(`/api/exam/issue/${id}`, {
       method: 'PATCH',
@@ -502,11 +533,13 @@ class ExamSyncService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
+    if (res.success && res.data) this.recordSession(res.data, true);
     return res;
   }
 
   public async logout(): Promise<void> {
     await this.readData(await this.request('/api/auth/logout', { method: 'POST' }));
+    this.recordSession(null, true);
   }
 
   public async resetExamData(scope: ExamResetScope, confirmation: string, expectedResetId: string | null): Promise<void> {

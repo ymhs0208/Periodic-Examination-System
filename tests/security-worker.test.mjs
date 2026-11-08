@@ -12,8 +12,8 @@ test('isolated Worker: REST/WS privacy, auth, audit, headers, recent verificatio
   const password = crypto.randomUUID(); const teacherPassword = crypto.randomUUID();
   const mf = new Miniflare(await convertV4MiniflareOptions({script:bundle.outputFiles[0].text,modules:true,compatibilityDate:'2026-11-07',durableObjects:{EXAM:{className:'ExamRoom',useSQLite:true}},bindings:{ADMIN_USERNAME:'local-test-admin',ADMIN_PASSWORD:password},serviceBindings:{ASSETS:()=>new Response('<!doctype html><title>local test</title>',{headers:{'Content-Type':'text/html'}})},log:new Log(LogLevel.ERROR)}));
   const sockets=[];
-  const request = async (path, method='GET', body, cookie) => {
-    const res = await mf.dispatchFetch(`http://localhost${path}`,{method,headers:{...(body ? {'Content-Type':'application/json'}:{}),...(cookie ? {Cookie:cookie}:{})},...(body ? {body:JSON.stringify(body)}:{})});
+  const request = async (path, method='GET', body, cookie, ip) => {
+    const res = await mf.dispatchFetch(`http://localhost${path}`,{method,headers:{...(body ? {'Content-Type':'application/json'}:{}),...(cookie ? {Cookie:cookie}:{}),...(ip ? {'CF-Connecting-IP':ip}:{})},...(body ? {body:JSON.stringify(body)}:{})});
     return {res, data: await res.json()};
   };
   let adminCookie;
@@ -110,7 +110,21 @@ test('isolated Worker: REST/WS privacy, auth, audit, headers, recent verificatio
       schoolName:'測試學校',academicYear:'115',examName:'測試段考',rulesNotes:['測試考場守則']
     })).res.status,200);
     assert.equal((await adminRequest('/api/exam/announcement','POST',{title:'測試公告',content:'測試內容'})).res.status,200);
-    assert.equal((await request('/api/exam/issue','POST',{classId:'test-room',periodId:'first',content:'測試通報'},teacherCookie)).res.status,200);
+    const issue=await request('/api/exam/issue','POST',{classId:'test-room',periodId:'first',content:'測試通報'},teacherCookie);
+    assert.equal(issue.res.status,200);
+    const issuePath=`/api/exam/issue/${issue.data.data.id}`;
+    const firstReply=await adminRequest(issuePath,'PATCH',{expectedRevision:null,status:'processing',reply:'已聯絡支援'});
+    assert.equal(firstReply.res.status,200);
+    const revision=firstReply.data.data.revision;
+    assert.ok(revision);
+    assert.equal((await adminRequest(issuePath,'PATCH',{expectedRevision:null,status:'processing',reply:'舊回覆'})).res.status,409);
+    const closure=await adminRequest(issuePath,'PATCH',{expectedRevision:revision,status:'resolved',reply:'處置完成'});
+    assert.equal(closure.res.status,200);
+    assert.equal((await adminRequest(issuePath,'PATCH',{expectedRevision:revision,status:'processing',reply:'晚送出的回覆'})).res.status,409);
+    assert.equal((await adminRequest(issuePath,'PATCH',{expectedRevision:closure.data.data.revision,status:'processing',reply:'嘗試重新開案'})).res.status,409);
+    const savedIssue=(await request('/api/exam/state','GET',undefined,adminCookie)).data.data.issues.find(item=>item.id===issue.data.data.id);
+    assert.equal(savedIssue.status,'resolved');
+    assert.equal(savedIssue.reply,'處置完成');
     assert.equal((await adminRequest('/api/exam/teachers','POST',{id:teacherId,name:'測試教師',username:'local-test-teacher',
       examAuthorAssignments:[{subject:'數學',grade:9}]})).res.status,200);
     assert.equal((await request('/api/exam/corrections','POST',{
@@ -195,5 +209,26 @@ test('isolated Worker: REST/WS privacy, auth, audit, headers, recent verificatio
     let limited=false;
     for(let i=0;i<241;i++){const r=await request('/api/exam/state');if(r.res.status===429){limited=true;assert.equal(r.res.headers.get('Retry-After'),'60');break;}}
     assert.equal(limited,true);
+
+    const adminLogin={role:'admin',username:'local-test-admin',password};
+    const attackerIp='192.0.2.10';
+    for(let i=0;i<8;i++) {
+      assert.equal((await request('/api/auth/login','POST',{...adminLogin,password:'invalid-test-password'},undefined,attackerIp)).res.status,401);
+    }
+    const throttled=await request('/api/auth/login','POST',adminLogin,undefined,attackerIp);
+    assert.equal(throttled.res.status,429);
+    assert.ok(Number(throttled.res.headers.get('Retry-After'))>0);
+    assert.equal((await request('/api/auth/login','POST',adminLogin,undefined,'192.0.2.11')).res.status,200);
+
+    let finishedLogins=0;
+    const loginBurst=Array.from({length:12},(_,index) =>
+      request('/api/auth/login','POST',{role:'admin',username:`unknown-${index}`,password:'invalid-test-password'},undefined,'192.0.2.12')
+        .then(({res}) => { finishedLogins++; assert.equal(res.status,401); }));
+    await wait(100);
+    const reading=await request('/api/exam/state','GET',undefined,undefined,'192.0.2.13');
+    const completedBeforeRead=finishedLogins;
+    await Promise.all(loginBurst);
+    assert.equal(reading.res.status,200);
+    assert.ok(completedBeforeRead<loginBurst.length,'exam read should finish before the login queue drains');
   } finally {for(const ws of sockets)ws.close();await mf.dispose();}
 });

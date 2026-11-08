@@ -32,7 +32,7 @@ export function validateMutation(path: string, method: string, b: Record<string,
     rules = { classId: text(128), className: text(100), periodId: text(64), expectedPeriod: object,
       type: oneOf('general','medical','paper','facility','violation','urgent'), content: text(3000), isUrgent: bool };
   } else if (/^\/api\/exam\/issue\/[^/]+$/.test(path)) {
-    rules = { status: oneOf('pending','processing','resolved'), reply: text(3000,true), repliedBy: text(100) };
+    rules = { status: oneOf('pending','processing','resolved'), reply: text(3000,true), repliedBy: text(100), expectedRevision: v => v === null || text(64)(v) };
   } else if (/^\/api\/exam\/classroom(?:\/[^/]+)?$/.test(path)) {
     if (method === 'DELETE') {
       rules = {};

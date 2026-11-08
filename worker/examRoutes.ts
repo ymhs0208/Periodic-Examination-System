@@ -601,11 +601,17 @@ api.patch('/api/exam/issue/:id', (c) => {
   const state = c.get('state');
   const broadcast = c.get('broadcast');
   const { id } = c.req.param();
-  const { status, reply, repliedBy } = c.get('body');
+  const { status, reply, repliedBy, expectedRevision } = c.get('body');
 
   const issue = state.issues.find((i) => i.id === id);
   if (!issue) {
     return c.json({ success: false, error: '問題不存在' }, 404);
+  }
+  if (issue.status === 'resolved') {
+    return c.json({ success: false, error: '此通報已結案。請重新載入查看結案回覆。' }, 409);
+  }
+  if (expectedRevision !== (issue.revision ?? null)) {
+    return c.json({ success: false, error: '此通報已有較新的處理紀錄，請重新載入並核對後再回覆。' }, 409);
   }
 
   if (status) issue.status = status;
@@ -615,6 +621,7 @@ api.patch('/api/exam/issue/:id', (c) => {
     issue.repliedAt = new Date().toISOString();
   }
 
+  issue.revision = crypto.randomUUID();
   broadcast('ISSUE_UPDATED', issue);
   return c.json({ success: true, data: issue });
 });

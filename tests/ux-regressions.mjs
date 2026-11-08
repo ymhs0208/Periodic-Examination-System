@@ -38,6 +38,22 @@ try {
   const { createEmptyExamState } = await server.ssrLoadModule('/src/types/exam.ts');
   const { invigilatorForPeriod } = await server.ssrLoadModule('/src/types/examSchedule.ts');
   const period = { id: 'p1', date: '2026-11-07', subject: '數學', startTime: '09:00', endTime: '10:00', grades: [] };
+  const { announcementsForPeriod } = await server.ssrLoadModule('/src/types/announcements.ts');
+  check('period CSV selects applicable announcements by display time, subject and audience', () => {
+    const base = { subject: '', targetAudience: 'all', publishedAt: '2026-11-07T00:30:00Z' };
+    const announcements = [
+      { ...base, id: 'before-exam' },
+      { ...base, id: 'this-period', subject: '數學', targetAudience: 'grade_1', startsAt: '2026-11-07T01:10:00Z' },
+      { ...base, id: 'different-subject', subject: '國文' },
+      { ...base, id: 'different-room', targetAudience: '102' },
+      { ...base, id: 'at-next-period', startsAt: '2026-11-07T02:00:00Z' },
+      { ...base, id: 'ended-before-period', endsAt: '2026-11-07T01:00:00Z' },
+      { ...base, id: 'previous-day', publishedAt: '2026-11-06T01:00:00Z' },
+      { ...base, id: 'spans-period', publishedAt: '2026-11-06T01:00:00Z', endsAt: '2026-11-07T01:20:00Z' }
+    ];
+    assert.deepEqual(announcementsForPeriod(announcements, period, [{ classId: '101', grade: 1 }]).map(({ id }) => id),
+      ['before-exam', 'this-period', 'spans-period']);
+  });
   const makeState = () => ({ ...createEmptyExamState(), config: { ...createEmptyExamState().config, periods: [period] }, teachers: [{ id: 'stable-id', name: '測試教師', username: 'test-teacher', department: '測試', assignedClassId: '', examAuthorAssignments: [{ subject: '數學', grade: 1 }] }], classrooms: [{ classId: '101', className: '測試班', grade: 1, expectedCount: 5, presentCount: 0, absentCount: 0, absentStudents: [], totalSeats: 30, invigilator: '測試教師', statusReported: false, lastUpdated: '', periodInvigilators: { p1: 'stable-id' }, periodAttendance: {} }] });
   check('period-only invigilator resolves correctly', () => { const s = makeState(); assert.equal(invigilatorForPeriod(s.classrooms[0], period.id, s.teachers)?.id, 'stable-id'); });
   const { AdminView } = await server.ssrLoadModule('/src/components/admin/AdminView.tsx');
@@ -95,6 +111,22 @@ try {
   globalThis.fetch = async (path) => Response.json({ success: true, data: path === '/api/exam/state' ? state : { ...state.classrooms[0], lastUpdated: version } });
   await examSync.updateAttendance(attendance);
   assert.ok(events.some(([event, data]) => event === 'INIT_STATE' && data.classrooms.length === 1)); passed++; console.log('PASS HTTP save refreshes UI without WebSocket');
+  events.length = 0;
+  let releaseSnapshot;
+  let markSnapshotRequested;
+  const snapshotRequested = new Promise((resolve) => { markSnapshotRequested = resolve; });
+  globalThis.fetch = async (path) => {
+    if (path === '/api/exam/state') {
+      return new Promise((resolve) => { releaseSnapshot = resolve; markSnapshotRequested(); });
+    }
+    return Response.json({ success: true, data: {} });
+  };
+  const delayedSave = assert.rejects(examSync.updateAttendance(attendance), /登入狀態已變更/);
+  await snapshotRequested;
+  await examSync.logout();
+  releaseSnapshot(Response.json({ success: true, data: state }));
+  await delayedSave;
+  assert.ok(!events.some(([event]) => event === 'INIT_STATE')); passed++; console.log('PASS delayed authenticated snapshot cannot return after logout');
   globalThis.fetch = oldFetch; globalThis.window = oldWindow; unsubscribe();
   console.log(`All ${passed} UX regression checks passed (in-memory only).`);
 } finally { await server.close(); }

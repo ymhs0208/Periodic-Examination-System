@@ -162,23 +162,25 @@ export function AdminIssueDesk({
                 </div>}
               </div>
               <div className="space-y-2.5 border-t border-slate-200 pt-4">
-                <h4 className="text-sm font-black text-slate-950">回覆與結案</h4>
-                <p className="text-xs leading-5 text-slate-700">請先依校內流程聯絡支援人員，再選擇回覆內容。系統只會傳送回覆給監考老師。</p>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  {replies.map(({ label, message, icon: Icon }) => (
-                    <button key={label} type="button" disabled={replying} onClick={() => onReply(selected.id, message, 'processing')}
-                      className={`flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left text-sm font-bold text-slate-800 hover:border-violet-300 hover:bg-violet-50 disabled:cursor-default disabled:opacity-50 ${focus}`}>
-                      <Icon size={17} className="shrink-0 text-violet-800" aria-hidden="true" />{label}
-                    </button>
-                  ))}
-                </div>
+                {selected.status !== 'resolved' && <>
+                  <h4 className="text-sm font-black text-slate-950">回覆與結案</h4>
+                  <p className="text-xs leading-5 text-slate-700">請先依校內流程聯絡支援人員，再選擇回覆內容。系統只會傳送回覆給監考老師。</p>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {replies.map(({ label, message, icon: Icon }) => (
+                      <button key={label} type="button" disabled={replying} onClick={() => onReply(selected.id, message, 'processing')}
+                        className={`flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left text-sm font-bold text-slate-800 hover:border-violet-300 hover:bg-violet-50 disabled:cursor-default disabled:opacity-50 ${focus}`}>
+                        <Icon size={17} className="shrink-0 text-violet-800" aria-hidden="true" />{label}
+                      </button>
+                    ))}
+                  </div>
+                </>}
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   {replying && <p role="status" className="mr-auto text-sm font-bold text-violet-900">正在儲存處理結果…</p>}
                   {feedback?.issueId === selected.id && <p role={feedback.error ? 'alert' : 'status'} className={`mr-auto rounded-lg px-2.5 py-2 text-sm font-bold ${feedback.error ? 'bg-rose-50 text-rose-900' : 'bg-emerald-50 text-emerald-900'}`}>{feedback.text}</p>}
-                  <button type="button" disabled={replying} onClick={() => onReply(selected.id, '教務處已確認處置完畢，紀錄於段考考務日誌。', 'resolved')}
+                  {selected.status !== 'resolved' && <button type="button" disabled={replying} onClick={() => onReply(selected.id, '教務處已確認處置完畢，紀錄於段考考務日誌。', 'resolved')}
                     className={`inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-violet-800 px-4 text-sm font-bold text-white hover:bg-violet-900 disabled:cursor-default disabled:opacity-50 sm:w-auto ${focus}`}>
                     <CheckCircle2 size={17} aria-hidden="true" />處置完成（結案）
-                  </button>
+                  </button>}
                 </div>
               </div>
             </div>

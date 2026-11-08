@@ -1,6 +1,6 @@
 import { useServerClock } from '../useServerClock';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, BellRing, Building2, ChevronLeft, ChevronRight, ClipboardCheck, Clock, Maximize, Minimize, Monitor, Pause, Play, RotateCw, Users, UserMinus, WifiOff } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, BellRing, Building2, ChevronLeft, ChevronRight, CircleCheck, ClipboardCheck, Clock, Maximize, Minimize, Monitor, Pause, Play, RotateCw, Users, UserMinus, WifiOff } from 'lucide-react';
 import type { SystemData } from '../../types/exam';
 import type { LiveConnection } from '../../services/examSync';
 import { academicOverview, academicStatus, type AcademicRoom } from './academicOverview';
@@ -17,13 +17,22 @@ interface Props {
 }
 const clock = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const receivedTime = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const roomStatuses = {
+  normal: { label: '已回報', icon: CircleCheck },
+  warning: { label: '未回報／待處理', icon: AlertTriangle },
+  absence: { label: '缺席偏高', icon: UserMinus },
+  critical: { label: '緊急通報', icon: BellRing },
+  neutral: { label: '未開始／無考程', icon: Clock }
+} as const;
 
 function RoomCard({ item, href, onOpen }: { item: AcademicRoom; href: string; onOpen: () => void }) {
   const { room, period, phase } = item;
-  const tone = item.urgentIssues ? 'critical' : item.missing ? 'warning' : item.highAbsence ? 'danger' :
+  const tone = item.urgentIssues ? 'critical' : item.missing ? 'warning' : item.highAbsence ? 'absence' :
     item.openIssues ? 'warning' : phase === 'upcoming' || phase === 'none' ? 'neutral' : 'normal';
+  const { icon: StatusIcon } = roomStatuses[tone];
+  const status = academicStatus(item);
   const known = !!period && room.statusReported;
-  return <a href={href} className={`academic-room academic-room--${tone}`} aria-label={`進入${room.className}，${academicStatus(item)}`}
+  return <a href={href} className={`academic-room academic-status--${tone}`} aria-label={`進入${room.className}，${status}`}
     onClick={(event) => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
       event.preventDefault();
@@ -34,8 +43,8 @@ function RoomCard({ item, href, onOpen }: { item: AcademicRoom; href: string; on
       <ArrowUpRight className="academic-room-arrow" size={17} aria-hidden="true" />
     </div>
     <div className="academic-room-context">
-      <span className="academic-room-status">{academicStatus(item)}</span>
-      {item.openIssues > 0 && <span className="academic-room-issue" title={`今日待處理通報 ${item.openIssues} 件，其中緊急 ${item.urgentIssues} 件`}><BellRing size={13} aria-hidden="true" />{item.openIssues} 件</span>}
+      <span className="academic-room-status"><StatusIcon size={15} aria-hidden="true" />{status}</span>
+      {item.openIssues > 0 && <span className="academic-room-issue" title={`今日待處理通報 ${item.openIssues} 件，其中緊急 ${item.urgentIssues} 件`}>通報 {item.openIssues} 件</span>}
     </div>
     <div className="academic-room-exam">
       {period && <span className="academic-room-period-number">第 {item.periodNumber} 節</span>}
@@ -228,11 +237,10 @@ export function AcademicBoardView({ data, liveConnection, lastDataReceivedAt, on
               <h2 id="academic-rooms-title"><Activity size={19} aria-hidden="true" />全校考場一覽</h2>
               <p>優先顯示緊急通報、未回報及缺席偏高考場</p>
             </div>
-            <ul className="academic-legend" aria-label="考場狀態顏色分級">
-              <li className="academic-legend-item academic-legend-item--normal">已回報</li>
-              <li className="academic-legend-item academic-legend-item--warning">待處理</li>
-              <li className="academic-legend-item academic-legend-item--danger">缺席偏高</li>
-              <li className="academic-legend-item academic-legend-item--critical">緊急通報</li>
+            <ul className="academic-legend" aria-label="考場狀態圖例">
+              {Object.entries(roomStatuses).map(([tone, { label, icon: Icon }]) => (
+                <li key={tone} className={`academic-legend-item academic-status--${tone}`}><Icon size={14} aria-hidden="true" />{label}</li>
+              ))}
             </ul>
           </div>
           <div ref={gridAreaRef} className="academic-grid-area" tabIndex={projection ? 0 : undefined} aria-label="全校考場卡片">

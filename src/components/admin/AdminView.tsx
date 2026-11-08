@@ -44,12 +44,12 @@ import { ExamResetSettings } from './ExamResetSettings';
 import { AuditLogView } from './AuditLogView';
 import { AdminIssueDesk } from './AdminIssueDesk';
 import { ExamPeriodSelect, useExamClock } from '../ExamPeriodSelect';
-import { dataForPeriod, periodLabel, preferredPeriod, reportingPeriods, scheduledExamSubjects, invigilatorForPeriod, examPeriods, periodApplies } from '../../types/examSchedule';
+import { dataForPeriod, periodLabel, preferredPeriod, reportingPeriods, scheduledExamSubjects, invigilatorForPeriod, examPeriods, periodApplies, LEGACY_PERIOD_ID } from '../../types/examSchedule';
 import { InvigilatorAssignments } from './InvigilatorAssignments';
 import { CorrectionReview } from '../CorrectionWorkflow';
 import { useActionConfirmation } from '../useActionConfirmation';
 import { useAnnouncementClock } from '../useAnnouncementClock';
-import { announcementDisplayStart, announcementStatus } from '../../types/announcements';
+import { announcementDisplayStart, announcementsForPeriod, announcementStatus } from '../../types/announcements';
 import { availableGrades, classroomGrades, gradeLabel } from '../../types/grades';
 import { BoardPortals } from '../BoardPortalHome';
 import { MAX_EXAM_AUTHOR_ASSIGNMENTS } from '../../types/exam';
@@ -684,7 +684,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Reply to Issue with quick action buttons
   const handleQuickDispatch = async (issueId: string, replyMessage: string, status: IssueStatus) => {
     const issue = data.issues.find((item) => item.id === issueId);
-    if (!issue || isReplying || !await confirmAction({
+    if (!issue || issue.status === 'resolved' || isReplying || !await confirmAction({
       title: status === 'resolved' ? '確認結案' : '確認回覆考場通報',
       description: '此操作只記錄處理狀態並回覆監考老師，不會自動聯絡或派遣支援人員。請確認已完成實際聯繫。',
       facts: [
@@ -698,6 +698,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     setReplyFeedback(undefined);
     try {
       await examSync.updateIssue(issueId, {
+        expectedRevision: issue.revision ?? null,
         status,
         reply: replyMessage,
         repliedBy: '教務處 試務中心'
@@ -827,6 +828,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
     const nowStr = formatTaipeiDateTime(serverNow());
     const examDateStr = attendanceData.config.examDate;
     const serialNo = `EXAM-${examDateStr.replace(/-/g, '')}-${attendanceData.config.subject}`;
+    const periodAnnouncements = announcementsForPeriod(data.announcements, selectedPeriod, attendanceData.classrooms);
+    const periodIssues = data.issues.filter((issue) => issue.periodId
+      ? issue.periodId === selectedPeriod?.id
+      : !selectedPeriod || selectedPeriod.id === LEGACY_PERIOD_ID);
 
     const lines: string[] = [];
 
@@ -1062,8 +1067,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
         .join(',')
     );
 
-    if (data.announcements.length > 0) {
-      data.announcements.forEach((a, idx) => {
+    if (periodAnnouncements.length > 0) {
+      periodAnnouncements.forEach((a, idx) => {
         lines.push(
           [
             idx + 1,
@@ -1105,8 +1110,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
         .join(',')
     );
 
-    if (data.issues.length > 0) {
-      data.issues.forEach((iss, idx) => {
+    if (periodIssues.length > 0) {
+      periodIssues.forEach((iss, idx) => {
         lines.push(
           [
             idx + 1,
@@ -1940,7 +1945,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-5">
-                <p className="max-w-md text-xs leading-5 text-slate-700">年級與缺席篩選只影響考場明細及缺席清冊。總表、公告與通報採全校資料。</p>
+                <p className="max-w-md text-xs leading-5 text-slate-700">年級與缺席篩選只影響考場明細及缺席清冊。CSV 的公告與通報依所選節次匯出。</p>
                 <div role="group" aria-label="匯出 CSV" className="flex flex-wrap items-center gap-2">
                   <button type="button" onClick={exportAttendanceCSV} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-violet-900 hover:bg-violet-50">
                     <Download size={16} aria-hidden="true" />全校彙總＋目前篩選明細 CSV

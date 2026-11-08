@@ -70,6 +70,7 @@ const CLASS_WRITE_PATHS = /^\/api\/exam\/(attendance|issue|announcement\/[^/]+\/
 const MAX_ACCOUNT_LENGTH = 128;
 const IP_FAILURES = { limit: 60, window: 5 * 60_000 };
 const ACCOUNT_FAILURES = { limit: 8, window: 15 * 60_000 };
+const MAX_PENDING_LOGINS = 24;
 const MIGRATION_BATCH = 25;
 
 function passwordRevision(hash?: string) {
@@ -88,6 +89,8 @@ function isLoopback(url: URL) {
 export class ExamRoom extends DurableObject<WorkerEnv> {
   private pendingRequests = 0;
   private requestQueue: Promise<unknown> = Promise.resolve();
+  private pendingLogins = 0;
+  private loginQueue: Promise<unknown> = Promise.resolve();
   private readonly readLimits = new Map<string, { count: number; until: number }>();
   private securityLogWindow = { count: 0, until: 0 };
   private readonly router = new Hono<{ Variables: ExamVariables }>();
@@ -171,6 +174,8 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
           return c.json({ success: false, error: '無法讀取請求資料' }, 400);
         }
       }
+      c.set('body', body);
+      if (method === 'POST' && path === '/api/auth/login') return next();
 
       // Serialize the read, change and storage write so simultaneous submissions cannot overwrite each other.
       return this.serializeRequest(async () => {
@@ -178,16 +183,15 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
         const credentialsPending = await this.migrateCredentials(state);
         if (credentialsPending) await this.scheduleNextAlarm(state, Date.now(), true);
         const token = getCookie(c, sessionCookie(c.req.url));
-        if (token || path === '/api/auth/login') await this.initializeAdminAccounts(isLoopback(new URL(c.req.url)));
+        if (token) await this.initializeAdminAccounts(isLoopback(new URL(c.req.url)));
         const session = this.getSession(token, state);
         const events: ExamEvent[] = [];
         c.set('state', state);
-        c.set('body', body);
         c.set('session', session);
         c.set('broadcast', (event, payload) => events.push({ event, payload }));
 
         const publicRoute = (method === 'GET' && ['/ws', '/api/exam/state', '/api/auth/session'].includes(path)) ||
-          (method === 'POST' && ['/api/auth/login', '/api/auth/logout'].includes(path));
+          (method === 'POST' && path === '/api/auth/logout');
         if (!publicRoute && session?.role !== 'admin') {
           if (!session) {
             this.securityAudit('accessDenied', null, 'authentication', c.res.headers.get('X-Request-ID'));
@@ -329,64 +333,7 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
       c.json({ success: true, data: this.getSession(getCookie(c, sessionCookie(c.req.url)), c.get('state')) })
     );
 
-    this.router.post('/api/auth/login', async (c) => {
-      const { role, username, password } = c.get('body');
-      const account = String(username ?? '').trim();
-      const secret = String(password ?? '').trim();
-      if (!account || account.length > MAX_ACCOUNT_LENGTH || !secret || secret.length > MAX_PASSWORD_LENGTH) {
-        this.securityAudit('loginFailed', null, 'invalid-input', c.res.headers.get('X-Request-ID'));
-        return c.json({ success: false, error: '帳號或密碼錯誤，請重新確認' }, 401);
-      }
-      const state = c.get('state');
-      const matchedAdmin = this.findAdminByName(account);
-      const nameMatches = state.teachers?.filter((entry) => entry.name === account);
-      const teacher = role === 'invigilator'
-        ? state.teachers?.find((entry) => entry.username === account) ??
-          (nameMatches?.length === 1 ? nameMatches[0] : undefined)
-        : undefined;
-      const now = Date.now();
-      const ipScope = `ip:${c.req.header('CF-Connecting-IP') || 'local'}`;
-      const accountScope = matchedAdmin ? `account:admin:${matchedAdmin.id}` : teacher ? `account:${teacher.id}` : `unknown:${account.toLowerCase()}`;
-      const limits = [{ scope: ipScope, ...IP_FAILURES }, { scope: accountScope, ...ACCOUNT_FAILURES }];
-      const retryAfter = this.loginRetryAfter(limits, now);
-      if (retryAfter > 0) {
-        c.header('Retry-After', String(retryAfter));
-        this.securityAudit('rateLimited', null, 'login', c.res.headers.get('X-Request-ID'));
-        return c.json({ success: false, error: '登入嘗試次數過多，請稍後再試' }, 429);
-      }
-
-      // Exactly two scrypt verifications on every well-formed, non-throttled attempt.
-      const adminValid = await verifyPassword(secret, matchedAdmin?.enabled ? matchedAdmin.password_hash : DUMMY_PASSWORD_HASH);
-      const teacherValid = await verifyPassword(secret, teacher?.passwordHash ?? DUMMY_PASSWORD_HASH);
-      const isAdmin = !!matchedAdmin?.enabled && adminValid;
-      const isTeacher = !isAdmin && !!teacher?.passwordHash && teacherValid;
-      if (!isAdmin && !isTeacher) {
-        this.securityAudit('loginFailed', matchedAdmin ? { role: 'admin', username: matchedAdmin.id } : teacher ? { role: 'invigilator', username: teacher.id } : null, 'credentials', c.res.headers.get('X-Request-ID'));
-        for (const limit of limits) this.recordLoginFailure(limit.scope, now + limit.window);
-        return c.json({ success: false, error: '帳號或密碼錯誤，請重新確認' }, 401);
-      }
-
-      this.ctx.storage.sql.exec('DELETE FROM login_failures WHERE scope = ?', accountScope);
-      const cookie = sessionCookie(c.req.url);
-      this.endSession(getCookie(c, cookie));
-      const token = crypto.randomUUID();
-      this.ctx.storage.sql.exec('DELETE FROM sessions_v2 WHERE expires <= ?', now);
-      this.ctx.storage.sql.exec('INSERT INTO sessions_v2 VALUES (?, ?, ?, ?, ?)',
-        token, isAdmin ? 'admin' : 'invigilator', isAdmin ? matchedAdmin!.id : teacher!.id,
-        now + SESSION_SECONDS * 1000, passwordRevision(isAdmin ? matchedAdmin!.password_hash : teacher?.passwordHash));
-      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO session_security VALUES (?, ?)', token, now);
-      const session = this.getSession(token, state)!;
-      this.recordAudit(session, 'login');
-      await this.scheduleNextAlarm(state, now, false);
-      setCookie(c, cookie, token, {
-        httpOnly: true,
-        secure: new URL(c.req.url).protocol === 'https:',
-        sameSite: 'Strict',
-        path: '/',
-        maxAge: SESSION_SECONDS
-      });
-      return c.json({ success: true, data: session });
-    });
+    this.router.post('/api/auth/login', (c) => this.enqueueLogin(c));
 
     this.router.post('/api/auth/reauth', async (c) => {
       const session = c.get('session')!;
@@ -492,6 +439,98 @@ export class ExamRoom extends DurableObject<WorkerEnv> {
     const task = this.requestQueue.then(work, work).finally(() => { this.pendingRequests--; });
     this.requestQueue = task.then(() => undefined, () => undefined);
     return task;
+  }
+
+  private async enqueueLogin(c: Context<{ Variables: ExamVariables }>) {
+    const { role, username, password } = c.get('body');
+    const account = String(username ?? '').trim();
+    const secret = String(password ?? '').trim();
+    const requestId = c.res.headers.get('X-Request-ID');
+    if (!account || account.length > MAX_ACCOUNT_LENGTH || !secret || secret.length > MAX_PASSWORD_LENGTH) {
+      this.securityAudit('loginFailed', null, 'invalid-input', requestId);
+      return c.json({ success: false, error: '帳號或密碼錯誤，請重新確認' }, 401);
+    }
+    if (this.pendingLogins >= MAX_PENDING_LOGINS) {
+      this.securityAudit('rateLimited', null, 'login-queue-capacity', requestId);
+      c.header('Retry-After', '5');
+      return c.json({ success: false, error: '登入請求較多，請稍後再試' }, 503);
+    }
+    this.pendingLogins++;
+    const task = this.loginQueue.then(() => this.login(c, account, secret, role === 'invigilator'))
+      .finally(() => { this.pendingLogins--; });
+    this.loginQueue = task.then(() => undefined, () => undefined);
+    return task;
+  }
+
+  private findLoginTeacher(state: StoredExamState, account: string) {
+    const nameMatches = state.teachers?.filter((entry) => entry.name === account);
+    return state.teachers?.find((entry) => entry.username === account) ??
+      (nameMatches?.length === 1 ? nameMatches[0] : undefined);
+  }
+
+  private async login(c: Context<{ Variables: ExamVariables }>, account: string, secret: string, allowTeacher: boolean) {
+    const url = new URL(c.req.url);
+    const requestId = c.res.headers.get('X-Request-ID');
+    const { matchedAdmin, teacher } = await this.serializeRequest(async () => {
+      const state = await this.ctx.storage.get<StoredExamState>(STATE_KEY) ?? createEmptyExamState();
+      if (await this.migrateCredentials(state)) await this.scheduleNextAlarm(state, Date.now(), true);
+      await this.initializeAdminAccounts(isLoopback(url));
+      return { matchedAdmin: this.findAdminByName(account), teacher: allowTeacher ? this.findLoginTeacher(state, account) : undefined };
+    });
+    const ip = c.req.header('CF-Connecting-IP') || 'local';
+    const accountKey = matchedAdmin ? `admin:${matchedAdmin.id}` : teacher ? `teacher:${teacher.id}` : `unknown:${account.toLowerCase()}`;
+    const accountScope = `login-source:${JSON.stringify([ip, accountKey])}`;
+    const limits = [{ scope: `ip:${ip}`, ...IP_FAILURES }, { scope: accountScope, ...ACCOUNT_FAILURES }];
+    const retryAfter = this.loginRetryAfter(limits, Date.now());
+    if (retryAfter > 0) {
+      c.header('Retry-After', String(retryAfter));
+      this.securityAudit('rateLimited', null, 'login', requestId);
+      return c.json({ success: false, error: '此連線來源登入嘗試次數過多，請稍後再試' }, 429);
+    }
+
+    // Workerd's scrypt can occupy the execution thread despite its callback API.
+    // Yield between hashes so waiting exam requests can run outside the login queue.
+    await scheduler.wait(0);
+    const adminValid = await verifyPassword(secret, matchedAdmin?.enabled ? matchedAdmin.password_hash : DUMMY_PASSWORD_HASH);
+    await scheduler.wait(0);
+    const teacherValid = await verifyPassword(secret, teacher?.passwordHash ?? DUMMY_PASSWORD_HASH);
+    const authenticated = matchedAdmin?.enabled && adminValid
+      ? { role: 'admin' as const, id: matchedAdmin.id, hash: matchedAdmin.password_hash }
+      : teacher?.passwordHash && teacherValid
+        ? { role: 'invigilator' as const, id: teacher.id, hash: teacher.passwordHash }
+        : null;
+    if (!authenticated) {
+      this.securityAudit('loginFailed', matchedAdmin ? { role: 'admin', username: matchedAdmin.id } : teacher ? { role: 'invigilator', username: teacher.id } : null, 'credentials', requestId);
+      const now = Date.now();
+      for (const limit of limits) this.recordLoginFailure(limit.scope, now + limit.window);
+      return c.json({ success: false, error: '帳號或密碼錯誤，請重新確認' }, 401);
+    }
+
+    return this.serializeRequest(async () => {
+      const state = await this.ctx.storage.get<StoredExamState>(STATE_KEY) ?? createEmptyExamState();
+      // Account status and credentials can change while password verification is outside the exam queue.
+      const current = authenticated.role === 'admin' ? this.findAdminByName(account) : this.findLoginTeacher(state, account);
+      const currentHash = current && ('password_hash' in current ? current.enabled && current.password_hash : current.passwordHash);
+      if (current?.id !== authenticated.id || currentHash !== authenticated.hash) {
+        this.securityAudit('loginFailed', null, 'credentials-changed', requestId);
+        return c.json({ success: false, error: '帳號或密碼錯誤，請重新確認' }, 401);
+      }
+
+      const now = Date.now();
+      this.ctx.storage.sql.exec('DELETE FROM login_failures WHERE scope = ?', accountScope);
+      const cookie = sessionCookie(c.req.url);
+      this.endSession(getCookie(c, cookie));
+      const token = crypto.randomUUID();
+      this.ctx.storage.sql.exec('DELETE FROM sessions_v2 WHERE expires <= ?', now);
+      this.ctx.storage.sql.exec('INSERT INTO sessions_v2 VALUES (?, ?, ?, ?, ?)',
+        token, authenticated.role, authenticated.id, now + SESSION_SECONDS * 1000, passwordRevision(authenticated.hash));
+      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO session_security VALUES (?, ?)', token, now);
+      const session = this.getSession(token, state)!;
+      this.recordAudit(session, 'login');
+      await this.scheduleNextAlarm(state, now, false);
+      setCookie(c, cookie, token, { httpOnly: true, secure: url.protocol === 'https:', sameSite: 'Strict', path: '/', maxAge: SESSION_SECONDS });
+      return c.json({ success: true, data: session });
+    });
   }
 
   private socketToken(socket: WebSocket): string | null {

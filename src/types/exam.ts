@@ -36,6 +36,7 @@ export interface ExamIssue {
   reply?: string;
   repliedBy?: string;
   repliedAt?: string;
+  revision?: string;
   createdAt: string;
   isUrgent?: boolean;
 }

@@ -434,17 +434,16 @@ export default function App() {
     invigilator: c.invigilator
   }));
 
-  const currentClassroom =
-    systemData.classrooms.find((c) => c.classId === selectedClassId) ||
-    systemData.classrooms[0];
   const teacherRooms = session?.role === 'invigilator' ? systemData.classrooms.filter((room) =>
     session.classId === room.classId || session.invigilation?.some((assignment) => assignment.classId === room.classId)
   ) : [];
   const teacherPeriods = (classId: string) => session?.invigilation?.filter((item) => item.classId === classId).map((item) => item.periodId);
-  const invigilatorClassroom = isAdminAuthed
-    ? currentClassroom
-    : teacherRooms.find((room) => room.classId === selectedClassId) ??
-      teacherRooms.find((room) => room.classId === session?.classId) ?? teacherRooms[0];
+  const requestedClassroomId = activeView === 'invigilator' ? parseRouteFromPathname(currentPath).classId : undefined;
+  const accessibleRooms = isAdminAuthed ? systemData.classrooms : teacherRooms;
+  const invigilatorClassroom = requestedClassroomId
+    ? accessibleRooms.find((room) => room.classId === requestedClassroomId)
+    : accessibleRooms.find((room) => room.classId === selectedClassId) ??
+      accessibleRooms.find((room) => room.classId === session?.classId) ?? accessibleRooms[0];
   const boardView = activeView === 'blackboard' || activeView === 'attendance' ? activeView : null;
   const boardClassroom = systemData.classrooms.find(
     (classroom) => boardView && currentPath === boardClassPath(boardView, classroom.classId)
@@ -471,6 +470,7 @@ export default function App() {
 
   const handleLoginSuccess = (authData: ExamSession) => {
     setSession(authData);
+    setSystemData(createEmptyExamState());
     setSessionCheck('ready');
     setIsLoading(true);
     setConnectionError(false);
@@ -534,7 +534,7 @@ export default function App() {
     ? <CorrectionSubmission key={session.teacherId} data={systemData} teacherId={session.teacherId}
         assignments={session.examAuthorAssignments ?? []} />
     : null;
-  const invigilatorRouteClassId = isAdminAuthed || teacherRooms.length > 1 ? invigilatorClassroom?.classId : undefined;
+  const invigilatorRouteClassId = requestedClassroomId || isAdminAuthed || teacherRooms.length > 1 ? invigilatorClassroom?.classId : undefined;
   const showWorkbench = activeView === 'invigilator' && isInvigilatorAuthed;
   const announcementNow = useAnnouncementClock(systemData.announcements, showWorkbench);
   const workbenchAnnouncements = showWorkbench && invigilatorClassroom
@@ -725,9 +725,18 @@ export default function App() {
                       ) : (
                         <>
                           <WorkbenchHeader tab={invigilatorTab} />
-                          <p className="wb-panel text-sm text-slate-700">{invigilatorTab === 'assignments'
-                            ? '此帳號沒有個人的監考安排。'
-                            : '目前尚未指派考場。教務處完成指派後，就能在這裡查看考場資料。'}</p>
+                          <div className="wb-panel space-y-3 text-sm text-slate-700">
+                            <p>{invigilatorTab === 'assignments' ? '此帳號沒有個人的監考安排。'
+                              : requestedClassroomId ? '這個連結指定的考場不存在，或目前帳號沒有查看權限。'
+                              : '目前尚未指派考場。教務處完成指派後，就能在這裡查看考場資料。'}</p>
+                            {requestedClassroomId && invigilatorTab !== 'assignments' && (
+                              <button type="button"
+                                onClick={() => isAdminAuthed ? navigateToAdminTab('matrix') : navigateToInvigilatorTab('assignments')}
+                                className="min-h-11 rounded-xl bg-teal-800 px-3 text-sm font-bold text-white hover:bg-teal-900">
+                                {isAdminAuthed ? '返回考場看板' : '查看我的監考安排'}
+                              </button>
+                            )}
+                          </div>
                         </>
                       )}
                     </div>
